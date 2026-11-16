@@ -176,8 +176,9 @@ io_connect_t getEventDriver()
 
 bool isModifier(CGKeyCode virtualKey)
 {
-  static const std::set<CGKeyCode> modifiers{s_shiftVK,      s_controlVK,      s_altVK,      s_superVK,     s_capsLockVK,
-                                             s_shiftRightVK, s_controlRightVK, s_altRightVK, s_superRightVK};
+  static const std::set<CGKeyCode> modifiers{s_shiftVK,        s_controlVK,  s_altVK,
+                                             s_superVK,        s_capsLockVK, s_shiftRightVK,
+                                             s_controlRightVK, s_altRightVK, s_superRightVK};
 
   return (modifiers.find(virtualKey) != modifiers.end());
 }
