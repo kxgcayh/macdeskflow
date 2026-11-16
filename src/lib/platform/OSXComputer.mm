@@ -108,6 +108,7 @@ OSXComputer::OSXComputer(IEventQueue *events, bool isPrimary, bool enableLangSyn
       m_activeModifierHotKeyMask(0),
       m_eventTapPort(nullptr),
       m_eventTapRLSR(nullptr),
+      m_logVerbose(false),
       m_lastClickTime(0),
       m_clickState(1),
       m_lastSingleClickXCursor(0),
@@ -689,6 +690,8 @@ void OSXComputer::hideCursor()
 
 void OSXComputer::enable()
 {
+  m_logVerbose = (CLOG->getFilter() >= LogLevel::Level::Verbose);
+
   // watch the clipboard
   m_clipboardTimer = m_events->newTimer(1.0, nullptr);
   m_events->addHandler(EventTypes::Timer, m_clipboardTimer, [this](const auto &) { checkClipboards(); });
@@ -1674,9 +1677,89 @@ OSXComputer::handleCGInputEventSecondary(CGEventTapProxy proxy, CGEventType type
 }
 
 // Quartz event tap support
+static bool isMouseEventType(CGEventType type)
+{
+  switch (type) {
+  case kCGEventLeftMouseDown:
+  case kCGEventLeftMouseUp:
+  case kCGEventRightMouseDown:
+  case kCGEventRightMouseUp:
+  case kCGEventLeftMouseDragged:
+  case kCGEventRightMouseDragged:
+  case kCGEventOtherMouseDown:
+  case kCGEventOtherMouseUp:
+  case kCGEventOtherMouseDragged:
+  case kCGEventScrollWheel:
+    return true;
+  default:
+    return false;
+  }
+}
+
 CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *refcon)
 {
   OSXComputer *computer = (OSXComputer *)refcon;
+
+  if (computer != nullptr && computer->m_logVerbose && type != kCGEventMouseMoved) {
+    const bool onComputer = computer->m_isOnComputer;
+    if (event != nullptr && isMouseEventType(type)) {
+      int64_t button = CGEventGetIntegerValueField(event, kCGMouseEventButtonNumber);
+      int64_t clickState = CGEventGetIntegerValueField(event, kCGMouseEventClickState);
+      int64_t subtype = CGEventGetIntegerValueField(event, kCGMouseEventSubtype);
+      int64_t deltaX = CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+      int64_t deltaY = CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+      LOG_VERBOSE(
+          "quartz event tap: type=%u, on-computer=%s, mouse[button=%lld, clickState=%lld, subtype=%lld, "
+          "deltaX=%lld, deltaY=%lld]",
+          (unsigned int)type, onComputer ? "true" : "false", (long long)button, (long long)clickState,
+          (long long)subtype, (long long)deltaX, (long long)deltaY
+      );
+    } else {
+      LOG_VERBOSE("quartz event tap: type=%u, on-computer=%s", (unsigned int)type, onComputer ? "true" : "false");
+    }
+
+    if (event != nullptr && (type == 29 || type == 30)) {
+      // Undocumented private CoreGraphics gesture field IDs (diagnostic-only, OS-version-sensitive).
+      static const struct
+      {
+        uint32_t id;
+        const char *name;
+      } s_gestureFields[] = {
+          {110, "subtype"}, {119, ""}, {123, "swipe_type"}, {124, "progress"}, {129, "velocity"},    {130, ""},
+          {132, "phase"},   {134, ""}, {135, ""},           {136, ""},         {165, "motion_axis"},
+      };
+      char buf[1024];
+      int offset = snprintf(
+          buf, sizeof(buf), "gesture fields (type=%u, on-computer=%s): ", (unsigned int)type,
+          onComputer ? "true" : "false"
+      );
+      if (offset < 0 || offset >= (int)sizeof(buf)) {
+        offset = sizeof(buf) - 1;
+      } else {
+        for (const auto &f : s_gestureFields) {
+          int remaining = sizeof(buf) - offset;
+          if (remaining <= 0) {
+            break;
+          }
+          int64_t iVal = CGEventGetIntegerValueField(event, (CGEventField)f.id);
+          double dVal = CGEventGetDoubleValueField(event, (CGEventField)f.id);
+          int written = 0;
+          if (f.name[0] != '\0') {
+            written =
+                snprintf(buf + offset, remaining, "[%u(%s): int=%lld dbl=%f] ", f.id, f.name, (long long)iVal, dVal);
+          } else {
+            written = snprintf(buf + offset, remaining, "[%u: int=%lld dbl=%f] ", f.id, (long long)iVal, dVal);
+          }
+          if (written < 0 || written >= remaining) {
+            buf[sizeof(buf) - 1] = '\0';
+            break;
+          }
+          offset += written;
+        }
+      }
+      LOG_VERBOSE("%s", buf);
+    }
+  }
 
   switch (type) {
   case kCGEventLeftMouseDown:

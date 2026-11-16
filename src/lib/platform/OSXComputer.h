@@ -304,6 +304,7 @@ private:
   CFRunLoopSourceRef m_eventTapRLSR;
   std::thread m_eventTapThread;
   CFRunLoopRef m_eventTapRunLoop = nullptr;
+  bool m_logVerbose = false;
 
   // for double click coalescing.
   double m_lastClickTime;
