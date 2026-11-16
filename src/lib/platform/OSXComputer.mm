@@ -751,6 +751,7 @@ void OSXComputer::enable()
 
 void OSXComputer::disable()
 {
+  m_swipeTracker.reset();
   showCursor();
 
   // FIXME -- stop watching jump zones, stop capturing input
@@ -793,6 +794,7 @@ void OSXComputer::disable()
 void OSXComputer::enter()
 {
   m_isOnComputer = true;
+  m_swipeTracker.reset();
   showCursor();
 
   if (m_isPrimary) {
@@ -834,6 +836,7 @@ void OSXComputer::leave()
 
   // now off computer
   m_isOnComputer = false;
+  m_swipeTracker.reset();
 }
 
 bool OSXComputer::setClipboard(ClipboardID, const IClipboard *src)
@@ -1676,6 +1679,43 @@ OSXComputer::handleCGInputEventSecondary(CGEventTapProxy proxy, CGEventType type
   return event;
 }
 
+void OSXComputer::sendClientKeystroke(KeyID key, KeyModifierMask mask)
+{
+  LOG_VERBOSE("sending synthetic gesture keystroke to client: key=0x%04x mask=0x%04x", key, mask);
+  m_events->addEvent(Event(EventTypes::KeyStateKeyDown, getEventTarget(), IKeyState::KeyInfo::alloc(key, mask, 0, 1)));
+  m_events->addEvent(Event(EventTypes::KeyStateKeyUp, getEventTarget(), IKeyState::KeyInfo::alloc(key, mask, 0, 1)));
+}
+
+void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields)
+{
+  deskflow::OSXSwipeDirection dir = deskflow::OSXSwipeDirection::None;
+  if (m_swipeTracker.processEvent(fields, dir)) {
+    KeyID key = kKeyNone;
+    KeyModifierMask mask = 0;
+    if (deskflow::getKeystrokeForSwipe(dir, key, mask)) {
+      LOG_VERBOSE("dock swipe ended: direction=%s, sending keystroke to client", deskflow::swipeDirectionToString(dir));
+      sendClientKeystroke(key, mask);
+    }
+  } else if (deskflow::isGesturePhaseEnded(fields.phase)) {
+    LOG_VERBOSE(
+        "dock swipe ended without valid direction (axis=%lld, progress=%f, velocity=%f)", (long long)fields.motionAxis,
+        fields.progress, fields.velocity
+    );
+  } else if (deskflow::isGesturePhaseCancelled(fields.phase)) {
+    LOG_VERBOSE("dock swipe cancelled");
+  } else if (deskflow::isGesturePhaseBegan(fields.phase)) {
+    LOG_VERBOSE(
+        "dock swipe began: axis=%lld, progress=%f, velocity=%f", (long long)fields.motionAxis, fields.progress,
+        fields.velocity
+    );
+  } else if (deskflow::isGesturePhaseChanged(fields.phase)) {
+    LOG_VERBOSE(
+        "dock swipe changed: axis=%lld, progress=%f, velocity=%f", (long long)fields.motionAxis, fields.progress,
+        fields.velocity
+    );
+  }
+}
+
 // Quartz event tap support
 static bool isMouseEventType(CGEventType type)
 {
@@ -1759,6 +1799,16 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
       }
       LOG_VERBOSE("%s", buf);
     }
+  }
+
+  if (computer != nullptr && !computer->m_isOnComputer && event != nullptr && (type == 29 || type == 30)) {
+    deskflow::OSXPrivateGestureFields gestureFields = deskflow::readPrivateGestureFields(event);
+    if (type == 30 && gestureFields.hidType == 23) {
+      computer->handleDockSwipe(event, gestureFields);
+      return nullptr;
+    }
+    // Swallow gesture events while cursor is on secondary client to prevent local execution
+    return nullptr;
   }
 
   switch (type) {

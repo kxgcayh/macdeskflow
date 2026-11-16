@@ -96,6 +96,8 @@ elseif(APPLE)
     OSXComputer.mm
     OSXEventQueueBuffer.cpp
     OSXEventQueueBuffer.h
+    OSXGestureHelper.cpp
+    OSXGestureHelper.h
     OSXKeyLayoutResource.cpp
     OSXKeyLayoutResource.h
     OSXKeyState.cpp

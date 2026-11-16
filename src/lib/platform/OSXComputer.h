@@ -10,6 +10,7 @@
 
 #include "deskflow/PlatformComputer.h"
 #include "platform/OSXClipboard.h"
+#include "platform/OSXGestureHelper.h"
 #include "platform/OSXPowerManager.h"
 
 #include <Carbon/Carbon.h>
@@ -19,6 +20,7 @@
 #include <mach/mach_interface.h>
 #include <mach/mach_port.h>
 
+#include <atomic>
 #include <bitset>
 #include <map>
 #include <memory>
@@ -125,6 +127,9 @@ private:
   bool onKey(CGEventRef event);
 
   void onMediaKey(CGEventRef event);
+
+  void sendClientKeystroke(KeyID key, KeyModifierMask mask);
+  void handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields);
 
   bool onHotKey(EventRef event) const;
 
@@ -305,6 +310,9 @@ private:
   std::thread m_eventTapThread;
   CFRunLoopRef m_eventTapRunLoop = nullptr;
   bool m_logVerbose = false;
+
+  // Trackpad gesture and dock swipe tracking
+  deskflow::OSXDockSwipeTracker m_swipeTracker;
 
   // for double click coalescing.
   double m_lastClickTime;

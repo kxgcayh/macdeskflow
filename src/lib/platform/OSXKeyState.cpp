@@ -45,10 +45,9 @@ public:
   KeyID m_keyID;
   uint32_t m_virtualKey;
 };
-static const KeyEntry s_controlKeys[] = {
-    // cursor keys.  if we don't do this we'll may still get these from
-    // the keyboard resource but they may not correspond to the arrow
-    // keys.
+static const KeyEntry s_controlKeys[] = { // cursor keys.  if we don't do this we'll may still get these from
+                                          // the keyboard resource but they may not correspond to the arrow
+                                          // keys.
     {kKeyLeft, kVK_LeftArrow},
     {kKeyRight, kVK_RightArrow},
     {kKeyUp, kVK_UpArrow},
@@ -176,8 +175,9 @@ io_connect_t getEventDriver()
 
 bool isModifier(CGKeyCode virtualKey)
 {
-  static const std::set<CGKeyCode> modifiers{s_shiftVK,      s_controlVK,      s_altVK,      s_superVK,     s_capsLockVK,
-                                             s_shiftRightVK, s_controlRightVK, s_altRightVK, s_superRightVK};
+  static const std::set<CGKeyCode> modifiers{s_shiftVK,        s_controlVK,  s_altVK,
+                                             s_superVK,        s_capsLockVK, s_shiftRightVK,
+                                             s_controlRightVK, s_altRightVK, s_superRightVK};
 
   return (modifiers.find(virtualKey) != modifiers.end());
 }
