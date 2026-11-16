@@ -45,91 +45,91 @@ public:
   KeyID m_keyID;
   uint32_t m_virtualKey;
 };
-static const KeyEntry s_controlKeys[] = {// cursor keys.  if we don't do this we'll may still get these from
-                                         // the keyboard resource but they may not correspond to the arrow
-                                         // keys.
-                                         {kKeyLeft, kVK_LeftArrow},
-                                         {kKeyRight, kVK_RightArrow},
-                                         {kKeyUp, kVK_UpArrow},
-                                         {kKeyDown, kVK_DownArrow},
-                                         {kKeyHome, kVK_Home},
-                                         {kKeyEnd, kVK_End},
-                                         {kKeyPageUp, kVK_PageUp},
-                                         {kKeyPageDown, kVK_PageDown},
-                                         {kKeyInsert, kVK_Help}, // Mac Keyboards have 'Help' on 'Insert'
+static const KeyEntry s_controlKeys[] = { // cursor keys.  if we don't do this we'll may still get these from
+                                          // the keyboard resource but they may not correspond to the arrow
+                                          // keys.
+    {kKeyLeft, kVK_LeftArrow},
+    {kKeyRight, kVK_RightArrow},
+    {kKeyUp, kVK_UpArrow},
+    {kKeyDown, kVK_DownArrow},
+    {kKeyHome, kVK_Home},
+    {kKeyEnd, kVK_End},
+    {kKeyPageUp, kVK_PageUp},
+    {kKeyPageDown, kVK_PageDown},
+    {kKeyInsert, kVK_Help}, // Mac Keyboards have 'Help' on 'Insert'
 
-                                         // function keys
-                                         {kKeyF1, kVK_F1},
-                                         {kKeyF2, kVK_F2},
-                                         {kKeyF3, kVK_F3},
-                                         {kKeyF4, kVK_F4},
-                                         {kKeyF5, kVK_F5},
-                                         {kKeyF6, kVK_F6},
-                                         {kKeyF7, kVK_F7},
-                                         {kKeyF8, kVK_F8},
-                                         {kKeyF9, kVK_F9},
-                                         {kKeyF10, kVK_F10},
-                                         {kKeyF11, kVK_F11},
-                                         {kKeyF12, kVK_F12},
-                                         {kKeyF13, kVK_F13},
-                                         {kKeyF14, kVK_F14},
-                                         {kKeyF15, kVK_F15},
-                                         {kKeyF16, kVK_F16},
-                                         {kKeyF17, kVK_F17},
-                                         {kKeyF18, kVK_F18},
-                                         {kKeyF19, kVK_F19},
-                                         {kKeyF20, kVK_F20},
+    // function keys
+    {kKeyF1, kVK_F1},
+    {kKeyF2, kVK_F2},
+    {kKeyF3, kVK_F3},
+    {kKeyF4, kVK_F4},
+    {kKeyF5, kVK_F5},
+    {kKeyF6, kVK_F6},
+    {kKeyF7, kVK_F7},
+    {kKeyF8, kVK_F8},
+    {kKeyF9, kVK_F9},
+    {kKeyF10, kVK_F10},
+    {kKeyF11, kVK_F11},
+    {kKeyF12, kVK_F12},
+    {kKeyF13, kVK_F13},
+    {kKeyF14, kVK_F14},
+    {kKeyF15, kVK_F15},
+    {kKeyF16, kVK_F16},
+    {kKeyF17, kVK_F17},
+    {kKeyF18, kVK_F18},
+    {kKeyF19, kVK_F19},
+    {kKeyF20, kVK_F20},
 
-                                         {kKeyKP_0, kVK_ANSI_Keypad0},
-                                         {kKeyKP_1, kVK_ANSI_Keypad1},
-                                         {kKeyKP_2, kVK_ANSI_Keypad2},
-                                         {kKeyKP_3, kVK_ANSI_Keypad3},
-                                         {kKeyKP_4, kVK_ANSI_Keypad4},
-                                         {kKeyKP_5, kVK_ANSI_Keypad5},
-                                         {kKeyKP_6, kVK_ANSI_Keypad6},
-                                         {kKeyKP_7, kVK_ANSI_Keypad7},
-                                         {kKeyKP_8, kVK_ANSI_Keypad8},
-                                         {kKeyKP_9, kVK_ANSI_Keypad9},
-                                         {kKeyKP_Decimal, kVK_ANSI_KeypadDecimal},
-                                         {kKeyKP_Equal, kVK_ANSI_KeypadEquals},
-                                         {kKeyKP_Multiply, kVK_ANSI_KeypadMultiply},
-                                         {kKeyKP_Add, kVK_ANSI_KeypadPlus},
-                                         {kKeyKP_Divide, kVK_ANSI_KeypadDivide},
-                                         {kKeyKP_Subtract, kVK_ANSI_KeypadMinus},
-                                         {kKeyKP_Enter, kVK_ANSI_KeypadEnter},
+    {kKeyKP_0, kVK_ANSI_Keypad0},
+    {kKeyKP_1, kVK_ANSI_Keypad1},
+    {kKeyKP_2, kVK_ANSI_Keypad2},
+    {kKeyKP_3, kVK_ANSI_Keypad3},
+    {kKeyKP_4, kVK_ANSI_Keypad4},
+    {kKeyKP_5, kVK_ANSI_Keypad5},
+    {kKeyKP_6, kVK_ANSI_Keypad6},
+    {kKeyKP_7, kVK_ANSI_Keypad7},
+    {kKeyKP_8, kVK_ANSI_Keypad8},
+    {kKeyKP_9, kVK_ANSI_Keypad9},
+    {kKeyKP_Decimal, kVK_ANSI_KeypadDecimal},
+    {kKeyKP_Equal, kVK_ANSI_KeypadEquals},
+    {kKeyKP_Multiply, kVK_ANSI_KeypadMultiply},
+    {kKeyKP_Add, kVK_ANSI_KeypadPlus},
+    {kKeyKP_Divide, kVK_ANSI_KeypadDivide},
+    {kKeyKP_Subtract, kVK_ANSI_KeypadMinus},
+    {kKeyKP_Enter, kVK_ANSI_KeypadEnter},
 
-                                         // virtual key 110 is fn+enter and i have no idea what that's supposed
-                                         // to map to.  also the enter key with numlock on is a modifier but i
-                                         // don't know which.
+    // virtual key 110 is fn+enter and i have no idea what that's supposed
+    // to map to.  also the enter key with numlock on is a modifier but i
+    // don't know which.
 
-                                         // modifier keys.  map the left and right variants to their respective
-                                         // macOS virtual keys so the modifier side is preserved on the client.
-                                         {kKeyShift_L, s_shiftVK},
-                                         {kKeyShift_R, s_shiftRightVK},
-                                         {kKeyControl_L, s_controlVK},
-                                         {kKeyControl_R, s_controlRightVK},
-                                         {kKeyAlt_L, s_altVK},
-                                         {kKeyAlt_R, s_altRightVK},
-                                         {kKeySuper_L, s_superVK},
-                                         {kKeySuper_R, s_superRightVK},
-                                         {kKeyMeta_L, s_superVK},
-                                         {kKeyMeta_R, s_superRightVK},
+    // modifier keys.  map the left and right variants to their respective
+    // macOS virtual keys so the modifier side is preserved on the client.
+    {kKeyShift_L, s_shiftVK},
+    {kKeyShift_R, s_shiftRightVK},
+    {kKeyControl_L, s_controlVK},
+    {kKeyControl_R, s_controlRightVK},
+    {kKeyAlt_L, s_altVK},
+    {kKeyAlt_R, s_altRightVK},
+    {kKeySuper_L, s_superVK},
+    {kKeySuper_R, s_superRightVK},
+    {kKeyMeta_L, s_superVK},
+    {kKeyMeta_R, s_superRightVK},
 
-                                         // toggle modifiers
-                                         {kKeyNumLock, s_numLockVK},
-                                         {kKeyCapsLock, s_capsLockVK},
+    // toggle modifiers
+    {kKeyNumLock, s_numLockVK},
+    {kKeyCapsLock, s_capsLockVK},
 
-                                         // for Apple Pro JIS Keyboard, map Kana (IME activate) to Henkan (show next
-                                         // IME conversion), and
-                                         // Eisu (IME deactivate) to Zenkaku (IME activation toggle) on Windows
-                                         // Japanese keyboard (OADG109A)
-                                         {kKeyHenkan, kVK_JIS_Kana},
-                                         {kKeyZenkaku, kVK_JIS_Eisu},
+    // for Apple Pro JIS Keyboard, map Kana (IME activate) to Henkan (show next
+    // IME conversion), and
+    // Eisu (IME deactivate) to Zenkaku (IME activation toggle) on Windows
+    // Japanese keyboard (OADG109A)
+    {kKeyHenkan, kVK_JIS_Kana},
+    {kKeyZenkaku, kVK_JIS_Eisu},
 
-                                         {kKeyMissionControl, s_missionControlVK},
-                                         {kKeyLaunchpad, s_launchpadVK},
-                                         {kKeyBrightnessUp, s_brightnessUp},
-                                         {kKeyBrightnessDown, s_brightnessDown}
+    {kKeyMissionControl, s_missionControlVK},
+    {kKeyLaunchpad, s_launchpadVK},
+    {kKeyBrightnessUp, s_brightnessUp},
+    {kKeyBrightnessDown, s_brightnessDown}
 };
 
 namespace {
