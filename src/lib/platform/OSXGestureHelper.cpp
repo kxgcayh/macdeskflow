@@ -63,30 +63,6 @@ bool isGesturePhaseBegan(int64_t phase)
   return (phase & GesturePhase::Began) != 0;
 }
 
-bool isThreeFingerDragGesture(uint32_t type, const OSXPrivateGestureFields &fields, int touchCount)
-{
-  if (type != 29) {
-    return false;
-  }
-  // If touch count is known, it must be exactly 3.
-  if (touchCount > 0 && touchCount != 3) {
-    return false;
-  }
-  // Must NOT be a dock swipe, navigation swipe, or axis-bound gesture.
-  if (fields.swipeMotionAxis != 0 || fields.motionAxis != 0 || fields.hidType == 23) {
-    return false;
-  }
-  // Must have fluid touch HID type (27) or digitizer (11).
-  if (fields.hidType != 27 && fields.hidType != 11) {
-    return false;
-  }
-  // Must be in began or changed phase.
-  if (!isGesturePhaseBegan(fields.phase) && !isGesturePhaseChanged(fields.phase)) {
-    return false;
-  }
-  return true;
-}
-
 OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocity)
 {
   if (motionAxis == 1) { // Horizontal swipe

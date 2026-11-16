@@ -751,7 +751,6 @@ void OSXComputer::enable()
 
 void OSXComputer::disable()
 {
-  cancelDrag();
   m_swipeTracker.reset();
   showCursor();
 
@@ -795,7 +794,6 @@ void OSXComputer::disable()
 void OSXComputer::enter()
 {
   m_isOnComputer = true;
-  cancelDrag();
   m_swipeTracker.reset();
   showCursor();
 
@@ -839,7 +837,6 @@ void OSXComputer::leave()
   // now off computer
   m_isOnComputer = false;
   m_swipeTracker.reset();
-  cancelDrag();
 }
 
 bool OSXComputer::setClipboard(ClipboardID, const IClipboard *src)
@@ -1023,41 +1020,6 @@ bool OSXComputer::onMouseMove(CGEventRef event)
     // raw deltas from the event instead of diffing position.
     int32_t dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
     int32_t dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-
-    if (dx == 0 && dy == 0) {
-      // Check whether onMouseMove gets zero deltas because the cursor is decoupled
-      // with CGAssociateMouseAndMouseCursorPosition(false). Fall back to unaccelerated
-      // fields (170/171) or position diffs.
-      double unaccelX =
-          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
-      double unaccelY =
-          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
-      if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
-        dx = (int32_t)std::round(unaccelX);
-        dy = (int32_t)std::round(unaccelY);
-        if (dx == 0 && unaccelX != 0.0) {
-          dx = (unaccelX > 0.0) ? 1 : -1;
-        }
-        if (dy == 0 && unaccelY != 0.0) {
-          dy = (unaccelY > 0.0) ? 1 : -1;
-        }
-        LOG_VERBOSE("mouse delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY);
-      } else {
-        CGPoint pos = CGEventGetLocation(event);
-        std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
-        if (m_dragTracker.hasLastPositionUnlocked()) {
-          dx = (int32_t)std::round(pos.x - m_dragTracker.lastPositionUnlocked().x);
-          dy = (int32_t)std::round(pos.y - m_dragTracker.lastPositionUnlocked().y);
-          if (dx != 0 || dy != 0) {
-            LOG_VERBOSE("mouse delta from position diffs: %+d,%+d", dx, dy);
-          }
-        }
-        m_dragTracker.setLastPositionUnlocked(pos);
-      }
-    } else {
-      std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
-      m_dragTracker.setLastPositionUnlocked(CGEventGetLocation(event));
-    }
 
     LOG_VERBOSE("mouse delta %+d,%+d", dx, dy);
 
@@ -1724,24 +1686,6 @@ void OSXComputer::sendClientKeystroke(KeyID key, KeyModifierMask mask)
   m_events->addEvent(Event(EventTypes::KeyStateKeyUp, getEventTarget(), IKeyState::KeyInfo::alloc(key, mask, 0, 1)));
 }
 
-void OSXComputer::startDrag()
-{
-  std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
-  if (m_dragTracker.startDragUnlocked()) {
-    LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
-    onMouseButton(true, 1);
-  }
-}
-
-void OSXComputer::cancelDrag()
-{
-  std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
-  if (m_dragTracker.cancelDragUnlocked()) {
-    LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
-    onMouseButton(false, 1);
-  }
-}
-
 void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields)
 {
   deskflow::OSXSwipeDirection dir = deskflow::OSXSwipeDirection::None;
@@ -1770,108 +1714,6 @@ void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGe
         fields.velocity
     );
   }
-}
-
-bool OSXComputer::handleThreeFingerDrag(
-    CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields
-)
-{
-  // 1. Terminal phases (Ended or Cancelled) must be processed before active-drag branch
-  if (deskflow::isGesturePhaseEnded(fields.phase) || deskflow::isGesturePhaseCancelled(fields.phase)) {
-    std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
-    if (m_dragTracker.cancelDragUnlocked()) {
-      LOG_VERBOSE("three-finger drag ended: releasing button 1 (phase=%lld)", (long long)fields.phase);
-      onMouseButton(false, 1);
-      return true;
-    }
-    return false;
-  }
-
-  // 2. Query touch count if NSEvent is available
-  int touchCount = -1;
-  @autoreleasepool {
-    NSEvent *nsEvent = [NSEvent eventWithCGEvent:event];
-    if (nsEvent != nil) {
-      NSSet<NSTouch *> *touching = [nsEvent touchesMatchingPhase:NSTouchPhaseTouching inView:nil];
-      if (touching != nil && touching.count > 0) {
-        touchCount = static_cast<int>(touching.count);
-      } else {
-        NSSet<NSTouch *> *all = [nsEvent allTouches];
-        if (all != nil && all.count > 0) {
-          touchCount = static_cast<int>(all.count);
-        }
-      }
-    }
-  }
-
-  bool isDragGesture = deskflow::isThreeFingerDragGesture(type, fields, touchCount);
-
-  int32_t dx = 0;
-  int32_t dy = 0;
-  {
-    std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
-
-    if (!m_dragTracker.isDraggingUnlocked()) {
-      if (!isDragGesture) {
-        return false;
-      }
-      m_dragTracker.startDragUnlocked();
-      LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
-      onMouseButton(true, 1);
-    } else {
-      // If drag is active but touch count changed to non-3, or swipe gesture started, release button
-      if ((touchCount > 0 && touchCount != 3) || fields.swipeMotionAxis != 0 || fields.motionAxis != 0 ||
-          fields.hidType == 23) {
-        LOG_VERBOSE(
-            "three-finger drag interrupted (touchCount=%d, swipeAxis=%lld, axis=%lld): releasing drag", touchCount,
-            (long long)fields.swipeMotionAxis, (long long)fields.motionAxis
-        );
-        m_dragTracker.cancelDragUnlocked();
-        onMouseButton(false, 1);
-        return false;
-      }
-    }
-
-    dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
-    dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-    if (dx == 0 && dy == 0) {
-      double unaccelX =
-          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
-      double unaccelY =
-          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
-      if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
-        dx = (int32_t)std::round(unaccelX);
-        dy = (int32_t)std::round(unaccelY);
-        if (dx == 0 && unaccelX != 0.0) {
-          dx = (unaccelX > 0.0) ? 1 : -1;
-        }
-        if (dy == 0 && unaccelY != 0.0) {
-          dy = (unaccelY > 0.0) ? 1 : -1;
-        }
-        LOG_VERBOSE(
-            "three-finger drag delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY
-        );
-      } else {
-        CGPoint pos = CGEventGetLocation(event);
-        if (m_dragTracker.hasLastPositionUnlocked()) {
-          dx = (int32_t)std::round(pos.x - m_dragTracker.lastPositionUnlocked().x);
-          dy = (int32_t)std::round(pos.y - m_dragTracker.lastPositionUnlocked().y);
-          if (dx != 0 || dy != 0) {
-            LOG_VERBOSE("three-finger drag delta from position diffs: %+d,%+d", dx, dy);
-          }
-        }
-        m_dragTracker.setLastPositionUnlocked(pos);
-      }
-    } else {
-      m_dragTracker.setLastPositionUnlocked(CGEventGetLocation(event));
-      LOG_VERBOSE("three-finger drag delta from event: %+d,%+d", dx, dy);
-    }
-  }
-
-  if (dx != 0 || dy != 0) {
-    sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(dx, dy));
-  }
-  return true;
 }
 
 // Quartz event tap support
@@ -1964,10 +1806,8 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
     if (type == 30 && gestureFields.hidType == 23) {
       computer->handleDockSwipe(event, gestureFields);
       return nullptr;
-    } else if (computer->handleThreeFingerDrag(event, type, gestureFields)) {
-      return nullptr;
     }
-    // Swallow unrecognized gesture events while cursor is on secondary client to prevent local execution
+    // Swallow gesture events while cursor is on secondary client to prevent local execution
     return nullptr;
   }
 
@@ -2002,7 +1842,6 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
     computer->onKey(event);
     break;
   case kCGEventTapDisabledByTimeout:
-    computer->cancelDrag();
     // Re-enable our event-tap if we still have accessibility permissions
     if (computer->checkAXPermissions()) {
       CGEventTapEnable(computer->m_eventTapPort, true);
@@ -2010,7 +1849,6 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
     }
     break;
   case kCGEventTapDisabledByUserInput:
-    computer->cancelDrag();
     LOG_ERR("quartz event tap was disabled by user input");
     break;
   case NX_NULLEVENT:

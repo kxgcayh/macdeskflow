@@ -18,8 +18,6 @@ private Q_SLOTS:
   void classifyInvalidAxisAndZeroMovement();
   void keystrokeMapping();
   void gesturePhasesHierarchy();
-  void threeFingerDragGestureFilter();
-  void threeFingerDragTracker();
   void dockSwipeStateMachine();
   void nullEventSafe();
 };

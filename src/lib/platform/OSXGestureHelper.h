@@ -11,33 +11,24 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include <cmath>
 #include <cstdint>
-#include <mutex>
 
 namespace deskflow {
 
 // Private CoreGraphics / SkyLight event field IDs for trackpad gestures.
 // Undocumented SPI fields used by macOS WindowServer and Dock:
-//   110: kCGEventGestureHIDType (HID type: 23 = dock swipe, 27 = fluid touch)
+//   110: kCGEventGestureHIDType (HID type: 23 = dock swipe)
 //   123: kCGEventGestureSwipeMotionAxis (swipe motion axis: 1 = horizontal, 2 = vertical)
 //   124: kCGEventGestureSwipeProgress (scalar progress along motion axis)
-//   125: kCGEventGestureSwipePositionX
-//   126: kCGEventGestureSwipePositionY
 //   129: kCGEventGestureSwipeVelocity (scalar velocity along motion axis)
 //   132: kCGEventGesturePhase (CGSGesturePhase bitmask/values: 1=began, 2=changed, 4=ended, 8=cancelled)
 //   165: kCGEventGestureMotionAxis (motion axis: 1=horizontal, 2=vertical)
-//   170: kCGEventUnacceleratedPointerMovementX (raw horizontal delta)
-//   171: kCGEventUnacceleratedPointerMovementY (raw vertical delta)
 namespace GestureFieldID {
 constexpr uint32_t HIDType = 110;
 constexpr uint32_t SwipeMotionAxis = 123;
 constexpr uint32_t Progress = 124;
-constexpr uint32_t PositionX = 125;
-constexpr uint32_t PositionY = 126;
 constexpr uint32_t Velocity = 129;
 constexpr uint32_t Phase = 132;
 constexpr uint32_t MotionAxis = 165;
-constexpr uint32_t UnacceleratedX = 170;
-constexpr uint32_t UnacceleratedY = 171;
 constexpr int64_t DockSwipeHIDType = 23;
 } // namespace GestureFieldID
 
@@ -88,11 +79,6 @@ bool isGesturePhaseCancelled(int64_t phase);
 // Returns None if axis is unknown or direction cannot be determined.
 OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocity);
 
-// Determines if event represents a three-finger drag gesture.
-// Only returns true for began or changed phase with fluid touch HID type (27 or 11),
-// zero swipe motion axis, zero motion axis, hidType != 23, and touch count of 3 (or unspecified -1).
-bool isThreeFingerDragGesture(uint32_t type, const OSXPrivateGestureFields &fields, int touchCount = -1);
-
 // Maps a swipe direction to the keystroke that triggers the corresponding client action.
 // Up -> Ctrl+Up (Mission Control)
 // Down -> Ctrl+Down (App Exposé)
@@ -130,91 +116,6 @@ private:
   int64_t m_axis = 0;
   double m_progress = 0.0;
   double m_velocity = 0.0;
-};
-
-// Thread-safe tracker for three-finger drag state and position tracking.
-// Serializes flag transitions, position tracking, and button event synchronization.
-class OSXThreeFingerDragTracker
-{
-public:
-  OSXThreeFingerDragTracker() = default;
-
-  // Thread-safe external API
-  bool startDrag()
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return startDragUnlocked();
-  }
-
-  bool cancelDrag()
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return cancelDragUnlocked();
-  }
-
-  bool isDragging() const
-  {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    return m_dragging;
-  }
-
-  // Unlocked primitives for compound atomic operations with mutex()
-  bool startDragUnlocked()
-  {
-    if (!m_dragging) {
-      m_dragging = true;
-      m_hasLastPos = false;
-      return true;
-    }
-    return false;
-  }
-
-  bool cancelDragUnlocked()
-  {
-    if (m_dragging) {
-      m_dragging = false;
-      m_hasLastPos = false;
-      return true;
-    }
-    return false;
-  }
-
-  bool isDraggingUnlocked() const
-  {
-    return m_dragging;
-  }
-
-  bool hasLastPositionUnlocked() const
-  {
-    return m_hasLastPos;
-  }
-
-  CGPoint lastPositionUnlocked() const
-  {
-    return m_lastPos;
-  }
-
-  void setLastPositionUnlocked(CGPoint pos)
-  {
-    m_lastPos = pos;
-    m_hasLastPos = true;
-  }
-
-  void resetPositionUnlocked()
-  {
-    m_hasLastPos = false;
-  }
-
-  std::mutex &mutex()
-  {
-    return m_mutex;
-  }
-
-private:
-  mutable std::mutex m_mutex;
-  bool m_dragging = false;
-  CGPoint m_lastPos = CGPointZero;
-  bool m_hasLastPos = false;
 };
 
 } // namespace deskflow

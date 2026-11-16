@@ -8,10 +8,6 @@
 
 #include "platform/OSXGestureHelper.h"
 
-#include <atomic>
-#include <thread>
-#include <vector>
-
 using namespace deskflow;
 
 void OSXGestureHelperTests::classifyAllFourSwipeDirections()
@@ -151,121 +147,6 @@ void OSXGestureHelperTests::gesturePhasesHierarchy()
   QVERIFY(!isGesturePhaseChanged(32));
   QVERIFY(!isGesturePhaseEnded(32));
   QVERIFY(!isGesturePhaseCancelled(32));
-}
-
-void OSXGestureHelperTests::threeFingerDragGestureFilter()
-{
-  OSXPrivateGestureFields fields;
-  fields.hidType = 27; // Fluid touch
-  fields.swipeMotionAxis = 0;
-  fields.motionAxis = 0;
-  fields.phase = GesturePhase::Began;
-
-  // Valid 3-finger drag during Began
-  QVERIFY(isThreeFingerDragGesture(29, fields, 3));
-  // Valid with unspecified touchCount (-1)
-  QVERIFY(isThreeFingerDragGesture(29, fields, -1));
-
-  // Valid during Changed
-  fields.phase = GesturePhase::Changed;
-  QVERIFY(isThreeFingerDragGesture(29, fields, 3));
-
-  // Valid with digitizer hidType 11
-  fields.hidType = 11;
-  QVERIFY(isThreeFingerDragGesture(29, fields, 3));
-
-  // Wrong touch count (1, 2, 4, 5) must be rejected
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 1));
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 2));
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 4));
-
-  // Wrong event type
-  fields.hidType = 27;
-  QVERIFY(!isThreeFingerDragGesture(30, fields, 3));
-  QVERIFY(!isThreeFingerDragGesture(1, fields, 3));
-
-  // Dock swipe (hidType 23) must never be treated as drag
-  fields.hidType = 23;
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-  fields.hidType = 27;
-
-  // Axis-bound swipe (motionAxis != 0 or swipeMotionAxis != 0) must never be treated as drag
-  fields.motionAxis = 1;
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-  fields.motionAxis = 2;
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-  fields.motionAxis = 0;
-  fields.swipeMotionAxis = 1;
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-  fields.swipeMotionAxis = 0;
-
-  // Terminal phases (Ended or Cancelled) must not be treated as active drag
-  fields.phase = GesturePhase::Ended;
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-  fields.phase = GesturePhase::Cancelled;
-  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-}
-
-void OSXGestureHelperTests::threeFingerDragTracker()
-{
-  OSXThreeFingerDragTracker tracker;
-
-  // Initial state
-  QVERIFY(!tracker.isDragging());
-  QVERIFY(!tracker.hasLastPositionUnlocked());
-
-  // First startDrag succeeds
-  QVERIFY(tracker.startDrag());
-  QVERIFY(tracker.isDragging());
-
-  // Subsequent startDrag without cancel returns false
-  QVERIFY(!tracker.startDrag());
-  QVERIFY(tracker.isDragging());
-
-  // Position tracking
-  CGPoint pos1 = CGPointMake(100.0, 200.0);
-  tracker.setLastPositionUnlocked(pos1);
-  QVERIFY(tracker.hasLastPositionUnlocked());
-  QCOMPARE(tracker.lastPositionUnlocked().x, 100.0);
-  QCOMPARE(tracker.lastPositionUnlocked().y, 200.0);
-
-  // Cancel drag succeeds
-  QVERIFY(tracker.cancelDrag());
-  QVERIFY(!tracker.isDragging());
-  QVERIFY(!tracker.hasLastPositionUnlocked());
-
-  // Subsequent cancelDrag returns false (idempotent)
-  QVERIFY(!tracker.cancelDrag());
-  QVERIFY(!tracker.isDragging());
-
-  // Multithreaded concurrency test: ensure atomic transitions without race or deadlock
-  std::atomic<int> startsObserved{0};
-  std::atomic<int> cancelsObserved{0};
-  constexpr int iterations = 1000;
-
-  auto worker = [&]() {
-    for (int i = 0; i < iterations; ++i) {
-      if (tracker.startDrag()) {
-        startsObserved++;
-      }
-      if (tracker.cancelDrag()) {
-        cancelsObserved++;
-      }
-    }
-  };
-
-  std::thread t1(worker);
-  std::thread t2(worker);
-  t1.join();
-  t2.join();
-
-  // If still dragging at end, cancel it
-  if (tracker.cancelDrag()) {
-    cancelsObserved++;
-  }
-
-  QCOMPARE(startsObserved.load(), cancelsObserved.load());
-  QVERIFY(!tracker.isDragging());
 }
 
 void OSXGestureHelperTests::dockSwipeStateMachine()
