@@ -17,13 +17,13 @@ using namespace deskflow;
 void OSXGestureHelperTests::classifyAllFourSwipeDirections()
 {
   // Horizontal axis is 1: progress determines direction
-  // Progress < 0: Left (e.g. real value -0.25)
-  QCOMPARE(classifySwipeDirection(1, -0.25, -1.20), OSXSwipeDirection::Left);
-  QCOMPARE(classifySwipeDirection(1, -1.0, 0.0), OSXSwipeDirection::Left);
+  // Real hardware value: horizontal negative progress (-0.25) = swipe RIGHT
+  QCOMPARE(classifySwipeDirection(1, -0.25, -1.20), OSXSwipeDirection::Right);
+  QCOMPARE(classifySwipeDirection(1, -1.0, 0.0), OSXSwipeDirection::Right);
 
-  // Progress > 0: Right
-  QCOMPARE(classifySwipeDirection(1, 0.50, 2.10), OSXSwipeDirection::Right);
-  QCOMPARE(classifySwipeDirection(1, 1.0, 0.0), OSXSwipeDirection::Right);
+  // Horizontal positive progress = swipe LEFT
+  QCOMPARE(classifySwipeDirection(1, 0.50, 2.10), OSXSwipeDirection::Left);
+  QCOMPARE(classifySwipeDirection(1, 1.0, 0.0), OSXSwipeDirection::Left);
 
   // Vertical axis is 2: progress determines direction
   // Real hardware value: vertical with negative progress (-0.54) = swipe UP (Mission Control)
@@ -38,17 +38,17 @@ void OSXGestureHelperTests::classifyAllFourSwipeDirections()
 void OSXGestureHelperTests::classifyVelocityTieBreaker()
 {
   // When progress is approximately zero (<= 0.001), velocity acts as scalar tie-breaker
-  // Horizontal axis (1): negative velocity = Left, positive velocity = Right
-  QCOMPARE(classifySwipeDirection(1, 0.0, -500.0), OSXSwipeDirection::Left);
-  QCOMPARE(classifySwipeDirection(1, 0.0, 500.0), OSXSwipeDirection::Right);
+  // Horizontal axis (1): negative velocity = Right, positive velocity = Left
+  QCOMPARE(classifySwipeDirection(1, 0.0, -500.0), OSXSwipeDirection::Right);
+  QCOMPARE(classifySwipeDirection(1, 0.0, 500.0), OSXSwipeDirection::Left);
 
   // Vertical axis (2): negative velocity = Up, positive velocity = Down
   QCOMPARE(classifySwipeDirection(2, 0.0, -500.0), OSXSwipeDirection::Up);
   QCOMPARE(classifySwipeDirection(2, 0.0, 500.0), OSXSwipeDirection::Down);
 
   // When progress is non-zero, progress takes precedence over velocity
-  QCOMPARE(classifySwipeDirection(1, -0.25, 500.0), OSXSwipeDirection::Left);
-  QCOMPARE(classifySwipeDirection(1, 0.50, -500.0), OSXSwipeDirection::Right);
+  QCOMPARE(classifySwipeDirection(1, -0.25, 500.0), OSXSwipeDirection::Right);
+  QCOMPARE(classifySwipeDirection(1, 0.50, -500.0), OSXSwipeDirection::Left);
   QCOMPARE(classifySwipeDirection(2, -0.54, 500.0), OSXSwipeDirection::Up);
   QCOMPARE(classifySwipeDirection(2, 0.72, -500.0), OSXSwipeDirection::Down);
 }
@@ -340,26 +340,26 @@ void OSXGestureHelperTests::dockSwipeStateMachine()
   QCOMPARE(dir, OSXSwipeDirection::Down);
   QVERIFY(!tracker.isActive());
 
-  // 4. Real horizontal sequence: horizontal end -0.25 = Left
-  OSXPrivateGestureFields beganLeft;
-  beganLeft.phase = GesturePhase::Began;
-  beganLeft.motionAxis = 1;
-  beganLeft.progress = -0.05;
-  QVERIFY(!tracker.processEvent(beganLeft, dir));
+  // 4. Real horizontal sequence: end -0.25 horizontal = Right
+  OSXPrivateGestureFields beganHorizontal;
+  beganHorizontal.phase = GesturePhase::Began;
+  beganHorizontal.motionAxis = 1;
+  beganHorizontal.progress = -0.05;
+  QVERIFY(!tracker.processEvent(beganHorizontal, dir));
 
-  OSXPrivateGestureFields changedLeft;
-  changedLeft.phase = GesturePhase::Changed;
-  changedLeft.motionAxis = 1;
-  changedLeft.progress = -0.15;
-  QVERIFY(!tracker.processEvent(changedLeft, dir));
+  OSXPrivateGestureFields changedHorizontal;
+  changedHorizontal.phase = GesturePhase::Changed;
+  changedHorizontal.motionAxis = 1;
+  changedHorizontal.progress = -0.15;
+  QVERIFY(!tracker.processEvent(changedHorizontal, dir));
 
-  OSXPrivateGestureFields endedLeft;
-  endedLeft.phase = GesturePhase::Ended;
-  endedLeft.motionAxis = 1;
-  endedLeft.progress = -0.25;
-  endedLeft.velocity = -1.20;
-  QVERIFY(tracker.processEvent(endedLeft, dir));
-  QCOMPARE(dir, OSXSwipeDirection::Left);
+  OSXPrivateGestureFields endedHorizontal;
+  endedHorizontal.phase = GesturePhase::Ended;
+  endedHorizontal.motionAxis = 1;
+  endedHorizontal.progress = -0.25;
+  endedHorizontal.velocity = -1.20;
+  QVERIFY(tracker.processEvent(endedHorizontal, dir));
+  QCOMPARE(dir, OSXSwipeDirection::Right);
   QVERIFY(!tracker.isActive());
 
   // 5. Cancelled (8) sends nothing

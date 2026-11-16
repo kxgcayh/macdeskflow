@@ -90,12 +90,13 @@ bool isThreeFingerDragGesture(uint32_t type, const OSXPrivateGestureFields &fiel
 OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocity)
 {
   if (motionAxis == 1) { // Horizontal swipe
+    // Negative progress = swipe RIGHT; positive progress = swipe LEFT
     double sign = (std::abs(progress) > 0.001) ? progress : velocity;
     if (sign < -0.001) {
-      return OSXSwipeDirection::Left;
+      return OSXSwipeDirection::Right;
     }
     if (sign > 0.001) {
-      return OSXSwipeDirection::Right;
+      return OSXSwipeDirection::Left;
     }
   } else if (motionAxis == 2) { // Vertical swipe
     // Negative progress = swipe UP (Mission Control); positive progress = swipe DOWN (App Exposé)

@@ -83,7 +83,7 @@ bool isGesturePhaseCancelled(int64_t phase);
 
 // Classifies swipe direction based strictly on motion axis (1=horizontal, 2=vertical)
 // and sign of progress (scalar along motion axis), using velocity as a scalar tie-breaker.
-// Horizontal (axis 1): progress < 0 -> Left, progress > 0 -> Right
+// Horizontal (axis 1): progress < 0 -> Right, progress > 0 -> Left
 // Vertical (axis 2): progress < 0 -> Up (Mission Control), progress > 0 -> Down (App Exposé)
 // Returns None if axis is unknown or direction cannot be determined.
 OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocity);
