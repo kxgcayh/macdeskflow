@@ -86,12 +86,18 @@ public:
 
   CGEventFlags getModifierStateAsOSXFlags() const;
 
+  // Get synthetic event flags for virtual key (arrow keys, function keys, etc.)
+  static CGEventFlags getSyntheticFlagsForVirtualKey(CGKeyCode virtualKey);
+  CGEventFlags getVirtualKeyFlags(CGKeyCode virtualKey) const;
+
 protected:
   // KeyState overrides
   void getKeyMap(deskflow::KeyMap &keyMap) override;
   void fakeKey(const Keystroke &keystroke) override;
 
 private:
+  friend class OSXKeyStateTests;
+
   class KeyResource;
 
   // Add hard coded special keys to a deskflow::KeyMap.
@@ -130,7 +136,7 @@ private:
   // Post a key event to HID manager. It posts an event to HID client, a
   // much lower level than window manager which's the target from carbon
   // CGEventPost
-  kern_return_t postHIDVirtualKey(uint8_t virtualKeyCode, bool postDown);
+  kern_return_t postHIDVirtualKey(CGKeyCode virtualKeyCode, bool postDown);
 
   // Get keyboard event flags accorfing to keyboard modifiers
   CGEventFlags getKeyboardEventFlags() const;
