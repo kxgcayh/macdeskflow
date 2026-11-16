@@ -317,10 +317,8 @@ private:
   // Trackpad gesture and dock swipe tracking
   deskflow::OSXDockSwipeTracker m_swipeTracker;
 
-  // Three-finger drag tracking
-  std::atomic<bool> m_threeFingerDragging{false};
-  CGPoint m_lastEventPos = CGPointZero;
-  bool m_hasLastEventPos = false;
+  // Three-finger drag tracking (synchronized via m_dragTracker.mutex())
+  deskflow::OSXThreeFingerDragTracker m_dragTracker;
 
   // for double click coalescing.
   double m_lastClickTime;

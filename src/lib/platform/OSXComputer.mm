@@ -1044,19 +1044,19 @@ bool OSXComputer::onMouseMove(CGEventRef event)
         LOG_VERBOSE("mouse delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY);
       } else {
         CGPoint pos = CGEventGetLocation(event);
-        if (m_hasLastEventPos) {
-          dx = (int32_t)std::round(pos.x - m_lastEventPos.x);
-          dy = (int32_t)std::round(pos.y - m_lastEventPos.y);
+        std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
+        if (m_dragTracker.hasLastPositionUnlocked()) {
+          dx = (int32_t)std::round(pos.x - m_dragTracker.lastPositionUnlocked().x);
+          dy = (int32_t)std::round(pos.y - m_dragTracker.lastPositionUnlocked().y);
           if (dx != 0 || dy != 0) {
             LOG_VERBOSE("mouse delta from position diffs: %+d,%+d", dx, dy);
           }
         }
-        m_lastEventPos = pos;
-        m_hasLastEventPos = true;
+        m_dragTracker.setLastPositionUnlocked(pos);
       }
     } else {
-      m_lastEventPos = CGEventGetLocation(event);
-      m_hasLastEventPos = true;
+      std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
+      m_dragTracker.setLastPositionUnlocked(CGEventGetLocation(event));
     }
 
     LOG_VERBOSE("mouse delta %+d,%+d", dx, dy);
@@ -1726,8 +1726,8 @@ void OSXComputer::sendClientKeystroke(KeyID key, KeyModifierMask mask)
 
 void OSXComputer::startDrag()
 {
-  if (!m_threeFingerDragging.exchange(true)) {
-    m_hasLastEventPos = false;
+  std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
+  if (m_dragTracker.startDragUnlocked()) {
     LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
     onMouseButton(true, 1);
   }
@@ -1735,9 +1735,9 @@ void OSXComputer::startDrag()
 
 void OSXComputer::cancelDrag()
 {
-  if (m_threeFingerDragging.exchange(false)) {
+  std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
+  if (m_dragTracker.cancelDragUnlocked()) {
     LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
-    m_hasLastEventPos = false;
     onMouseButton(false, 1);
   }
 }
@@ -1778,9 +1778,10 @@ bool OSXComputer::handleThreeFingerDrag(
 {
   // 1. Terminal phases (Ended or Cancelled) must be processed before active-drag branch
   if (deskflow::isGesturePhaseEnded(fields.phase) || deskflow::isGesturePhaseCancelled(fields.phase)) {
-    if (m_threeFingerDragging.load()) {
+    std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
+    if (m_dragTracker.cancelDragUnlocked()) {
       LOG_VERBOSE("three-finger drag ended: releasing button 1 (phase=%lld)", (long long)fields.phase);
-      cancelDrag();
+      onMouseButton(false, 1);
       return true;
     }
     return false;
@@ -1805,58 +1806,65 @@ bool OSXComputer::handleThreeFingerDrag(
 
   bool isDragGesture = deskflow::isThreeFingerDragGesture(type, fields, touchCount);
 
-  if (!m_threeFingerDragging.load()) {
-    if (!isDragGesture) {
-      return false;
-    }
-    startDrag();
-  } else {
-    // If drag is active but touch count changed to non-3, or swipe gesture started, release button
-    if ((touchCount > 0 && touchCount != 3) || fields.swipeType != 0 || fields.motionAxis != 0) {
-      LOG_VERBOSE(
-          "three-finger drag interrupted (touchCount=%d, swipeType=%lld, axis=%lld): releasing drag", touchCount,
-          (long long)fields.swipeType, (long long)fields.motionAxis
-      );
-      cancelDrag();
-      return false;
-    }
-  }
+  int32_t dx = 0;
+  int32_t dy = 0;
+  {
+    std::lock_guard<std::mutex> lock(m_dragTracker.mutex());
 
-  int32_t dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
-  int32_t dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-  if (dx == 0 && dy == 0) {
-    double unaccelX =
-        CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
-    double unaccelY =
-        CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
-    if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
-      dx = (int32_t)std::round(unaccelX);
-      dy = (int32_t)std::round(unaccelY);
-      if (dx == 0 && unaccelX != 0.0) {
-        dx = (unaccelX > 0.0) ? 1 : -1;
+    if (!m_dragTracker.isDraggingUnlocked()) {
+      if (!isDragGesture) {
+        return false;
       }
-      if (dy == 0 && unaccelY != 0.0) {
-        dy = (unaccelY > 0.0) ? 1 : -1;
-      }
-      LOG_VERBOSE(
-          "three-finger drag delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY
-      );
+      m_dragTracker.startDragUnlocked();
+      LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
+      onMouseButton(true, 1);
     } else {
-      CGPoint pos = CGEventGetLocation(event);
-      if (m_hasLastEventPos) {
-        dx = (int32_t)std::round(pos.x - m_lastEventPos.x);
-        dy = (int32_t)std::round(pos.y - m_lastEventPos.y);
-        if (dx != 0 || dy != 0) {
-          LOG_VERBOSE("three-finger drag delta from position diffs: %+d,%+d", dx, dy);
-        }
+      // If drag is active but touch count changed to non-3, or swipe gesture started, release button
+      if ((touchCount > 0 && touchCount != 3) || fields.swipeType != 0 || fields.motionAxis != 0) {
+        LOG_VERBOSE(
+            "three-finger drag interrupted (touchCount=%d, swipeType=%lld, axis=%lld): releasing drag", touchCount,
+            (long long)fields.swipeType, (long long)fields.motionAxis
+        );
+        m_dragTracker.cancelDragUnlocked();
+        onMouseButton(false, 1);
+        return false;
       }
-      m_lastEventPos = pos;
-      m_hasLastEventPos = true;
     }
-  } else {
-    m_lastEventPos = CGEventGetLocation(event);
-    m_hasLastEventPos = true;
-    LOG_VERBOSE("three-finger drag delta from event: %+d,%+d", dx, dy);
+
+    dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+    dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+    if (dx == 0 && dy == 0) {
+      double unaccelX =
+          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
+      double unaccelY =
+          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
+      if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
+        dx = (int32_t)std::round(unaccelX);
+        dy = (int32_t)std::round(unaccelY);
+        if (dx == 0 && unaccelX != 0.0) {
+          dx = (unaccelX > 0.0) ? 1 : -1;
+        }
+        if (dy == 0 && unaccelY != 0.0) {
+          dy = (unaccelY > 0.0) ? 1 : -1;
+        }
+        LOG_VERBOSE(
+            "three-finger drag delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY
+        );
+      } else {
+        CGPoint pos = CGEventGetLocation(event);
+        if (m_dragTracker.hasLastPositionUnlocked()) {
+          dx = (int32_t)std::round(pos.x - m_dragTracker.lastPositionUnlocked().x);
+          dy = (int32_t)std::round(pos.y - m_dragTracker.lastPositionUnlocked().y);
+          if (dx != 0 || dy != 0) {
+            LOG_VERBOSE("three-finger drag delta from position diffs: %+d,%+d", dx, dy);
+          }
+        }
+        m_dragTracker.setLastPositionUnlocked(pos);
+      }
+    } else {
+      m_dragTracker.setLastPositionUnlocked(CGEventGetLocation(event));
+      LOG_VERBOSE("three-finger drag delta from event: %+d,%+d", dx, dy);
+    }
   }
 
   if (dx != 0 || dy != 0) {

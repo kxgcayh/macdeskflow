@@ -8,6 +8,10 @@
 
 #include "platform/OSXGestureHelper.h"
 
+#include <atomic>
+#include <thread>
+#include <vector>
+
 using namespace deskflow;
 
 void OSXGestureHelperTests::classifyAllFourSwipeDirections()
@@ -197,6 +201,68 @@ void OSXGestureHelperTests::threeFingerDragGestureFilter()
   QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
   fields.phase = GesturePhase::Cancelled;
   QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
+}
+
+void OSXGestureHelperTests::threeFingerDragTracker()
+{
+  OSXThreeFingerDragTracker tracker;
+
+  // Initial state
+  QVERIFY(!tracker.isDragging());
+  QVERIFY(!tracker.hasLastPositionUnlocked());
+
+  // First startDrag succeeds
+  QVERIFY(tracker.startDrag());
+  QVERIFY(tracker.isDragging());
+
+  // Subsequent startDrag without cancel returns false
+  QVERIFY(!tracker.startDrag());
+  QVERIFY(tracker.isDragging());
+
+  // Position tracking
+  CGPoint pos1 = CGPointMake(100.0, 200.0);
+  tracker.setLastPositionUnlocked(pos1);
+  QVERIFY(tracker.hasLastPositionUnlocked());
+  QCOMPARE(tracker.lastPositionUnlocked().x, 100.0);
+  QCOMPARE(tracker.lastPositionUnlocked().y, 200.0);
+
+  // Cancel drag succeeds
+  QVERIFY(tracker.cancelDrag());
+  QVERIFY(!tracker.isDragging());
+  QVERIFY(!tracker.hasLastPositionUnlocked());
+
+  // Subsequent cancelDrag returns false (idempotent)
+  QVERIFY(!tracker.cancelDrag());
+  QVERIFY(!tracker.isDragging());
+
+  // Multithreaded concurrency test: ensure atomic transitions without race or deadlock
+  std::atomic<int> startsObserved{0};
+  std::atomic<int> cancelsObserved{0};
+  constexpr int iterations = 1000;
+
+  auto worker = [&]() {
+    for (int i = 0; i < iterations; ++i) {
+      if (tracker.startDrag()) {
+        startsObserved++;
+      }
+      if (tracker.cancelDrag()) {
+        cancelsObserved++;
+      }
+    }
+  };
+
+  std::thread t1(worker);
+  std::thread t2(worker);
+  t1.join();
+  t2.join();
+
+  // If still dragging at end, cancel it
+  if (tracker.cancelDrag()) {
+    cancelsObserved++;
+  }
+
+  QCOMPARE(startsObserved.load(), cancelsObserved.load());
+  QVERIFY(!tracker.isDragging());
 }
 
 void OSXGestureHelperTests::dockSwipeStateMachine()

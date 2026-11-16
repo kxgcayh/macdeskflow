@@ -11,6 +11,7 @@
 #include <ApplicationServices/ApplicationServices.h>
 #include <cmath>
 #include <cstdint>
+#include <mutex>
 
 namespace deskflow {
 
@@ -128,6 +129,91 @@ private:
   int64_t m_axis = 0;
   double m_progress = 0.0;
   double m_velocity = 0.0;
+};
+
+// Thread-safe tracker for three-finger drag state and position tracking.
+// Serializes flag transitions, position tracking, and button event synchronization.
+class OSXThreeFingerDragTracker
+{
+public:
+  OSXThreeFingerDragTracker() = default;
+
+  // Thread-safe external API
+  bool startDrag()
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return startDragUnlocked();
+  }
+
+  bool cancelDrag()
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return cancelDragUnlocked();
+  }
+
+  bool isDragging() const
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_dragging;
+  }
+
+  // Unlocked primitives for compound atomic operations with mutex()
+  bool startDragUnlocked()
+  {
+    if (!m_dragging) {
+      m_dragging = true;
+      m_hasLastPos = false;
+      return true;
+    }
+    return false;
+  }
+
+  bool cancelDragUnlocked()
+  {
+    if (m_dragging) {
+      m_dragging = false;
+      m_hasLastPos = false;
+      return true;
+    }
+    return false;
+  }
+
+  bool isDraggingUnlocked() const
+  {
+    return m_dragging;
+  }
+
+  bool hasLastPositionUnlocked() const
+  {
+    return m_hasLastPos;
+  }
+
+  CGPoint lastPositionUnlocked() const
+  {
+    return m_lastPos;
+  }
+
+  void setLastPositionUnlocked(CGPoint pos)
+  {
+    m_lastPos = pos;
+    m_hasLastPos = true;
+  }
+
+  void resetPositionUnlocked()
+  {
+    m_hasLastPos = false;
+  }
+
+  std::mutex &mutex()
+  {
+    return m_mutex;
+  }
+
+private:
+  mutable std::mutex m_mutex;
+  bool m_dragging = false;
+  CGPoint m_lastPos = CGPointZero;
+  bool m_hasLastPos = false;
 };
 
 } // namespace deskflow
