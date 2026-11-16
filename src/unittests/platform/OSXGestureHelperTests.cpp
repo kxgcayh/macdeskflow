@@ -95,17 +95,40 @@ void OSXGestureHelperTests::gesturePhases()
   QVERIFY(!isGesturePhaseChanged(1));
   QVERIFY(!isGesturePhaseChanged(4));
 
-  // Ended: phase 4
-  QVERIFY(isGesturePhaseEnded(4, true));
-  QVERIFY(isGesturePhaseEnded(4, false));
-  QVERIFY(!isGesturePhaseEnded(0, true));
-  QVERIFY(!isGesturePhaseEnded(2, true));
+  // Ended: phase 4 (phase 8 must NEVER be treated as ended)
+  QVERIFY(isGesturePhaseEnded(4));
+  QVERIFY(!isGesturePhaseEnded(0));
+  QVERIFY(!isGesturePhaseEnded(2));
+  QVERIFY(!isGesturePhaseEnded(8));
 
   // Cancelled: phase 8 or 16
-  QVERIFY(isGesturePhaseCancelled(8, true));
-  QVERIFY(isGesturePhaseCancelled(16, false));
-  QVERIFY(!isGesturePhaseCancelled(0, true));
-  QVERIFY(!isGesturePhaseCancelled(4, true));
+  QVERIFY(isGesturePhaseCancelled(8));
+  QVERIFY(isGesturePhaseCancelled(16));
+  QVERIFY(!isGesturePhaseCancelled(0));
+  QVERIFY(!isGesturePhaseCancelled(4));
+}
+
+void OSXGestureHelperTests::threeFingerDragMetadata()
+{
+  OSXPrivateGestureFields fields;
+  fields.hidType = 27; // kIOHIDEventTypeFluidTouchGesture
+  fields.swipeType = 0;
+
+  // Type 29 with fluid touch is recognized
+  QVERIFY(isThreeFingerDragMetadata(29, fields));
+
+  // Digitizer type 11
+  fields.hidType = 11;
+  QVERIFY(isThreeFingerDragMetadata(29, fields));
+
+  // Dock swipe (swipe type 23) must not be recognized as drag
+  fields.swipeType = 23;
+  QVERIFY(!isThreeFingerDragMetadata(29, fields));
+
+  // Non-gesture event types must not be recognized as drag
+  fields.swipeType = 0;
+  QVERIFY(!isThreeFingerDragMetadata(30, fields));
+  QVERIFY(!isThreeFingerDragMetadata(1, fields));
 }
 
 void OSXGestureHelperTests::nullEventSafe()

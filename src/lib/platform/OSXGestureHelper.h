@@ -73,10 +73,14 @@ bool isGesturePhaseBegan(int64_t phase);
 bool isGesturePhaseChanged(int64_t phase);
 
 // Pure helper: checks if phase indicates gesture ended successfully (phase 4 in CGSGesturePhase)
-bool isGesturePhaseEnded(int64_t phase, bool sawPhaseChanged = true);
+bool isGesturePhaseEnded(int64_t phase);
 
 // Pure helper: checks if phase indicates gesture was cancelled (phase 8 in CGS, 16 in NSEvent)
-bool isGesturePhaseCancelled(int64_t phase, bool sawPhaseChanged = true);
+bool isGesturePhaseCancelled(int64_t phase);
+
+// Determines if gesture metadata indicates a three-finger drag gesture.
+// Checks event type (type 29) and private HID types (fluid touch / digitizer).
+bool isThreeFingerDragMetadata(uint32_t type, const OSXPrivateGestureFields &fields);
 
 // Pure helper: classifies swipe direction based on motion axis, progress, and velocity components.
 // Returns None if axis or direction cannot be determined.

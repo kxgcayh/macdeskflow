@@ -1733,7 +1733,17 @@ void OSXComputer::sendClientKeystroke(KeyID key, KeyModifierMask mask)
 
 void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields)
 {
-  if (deskflow::isGesturePhaseBegan(fields.phase)) {
+  if (deskflow::isGesturePhaseCancelled(fields.phase)) {
+    if (m_swipeActive) {
+      LOG_VERBOSE("dock swipe cancelled");
+      m_swipeActive = false;
+      m_swipeSawChanged = false;
+      m_swipeAxis = 0;
+      m_swipeProgress = 0.0;
+      m_swipeVelocityX = 0.0;
+      m_swipeVelocityY = 0.0;
+    }
+  } else if (deskflow::isGesturePhaseBegan(fields.phase)) {
     m_swipeActive = true;
     m_swipeSawChanged = false;
     m_swipeAxis = fields.motionAxis;
@@ -1763,7 +1773,7 @@ void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGe
         "dock swipe changed: axis=%lld, progress=%f, velX=%f, velY=%f", (long long)m_swipeAxis, m_swipeProgress,
         m_swipeVelocityX, m_swipeVelocityY
     );
-  } else if (deskflow::isGesturePhaseEnded(fields.phase, m_swipeSawChanged)) {
+  } else if (deskflow::isGesturePhaseEnded(fields.phase)) {
     if (m_swipeActive) {
       if (fields.motionAxis != 0) {
         m_swipeAxis = fields.motionAxis;
@@ -1804,20 +1814,10 @@ void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGe
       m_swipeVelocityX = 0.0;
       m_swipeVelocityY = 0.0;
     }
-  } else if (deskflow::isGesturePhaseCancelled(fields.phase, m_swipeSawChanged)) {
-    if (m_swipeActive) {
-      LOG_VERBOSE("dock swipe cancelled");
-      m_swipeActive = false;
-      m_swipeSawChanged = false;
-      m_swipeAxis = 0;
-      m_swipeProgress = 0.0;
-      m_swipeVelocityX = 0.0;
-      m_swipeVelocityY = 0.0;
-    }
   }
 }
 
-void OSXComputer::handleThreeFingerDrag(
+bool OSXComputer::handleThreeFingerDrag(
     CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields
 )
 {
@@ -1826,15 +1826,20 @@ void OSXComputer::handleThreeFingerDrag(
     NSEvent *nsEvent = [NSEvent eventWithCGEvent:event];
     if (nsEvent != nil) {
       NSSet<NSTouch *> *touching = [nsEvent touchesMatchingPhase:NSTouchPhaseTouching inView:nil];
-      if (touching != nil && touching.count == 3) {
-        isThreeFinger = true;
+      if (touching != nil && touching.count > 0) {
+        isThreeFinger = (touching.count == 3);
       } else {
         NSSet<NSTouch *> *all = [nsEvent allTouches];
-        if (all != nil && all.count == 3) {
-          isThreeFinger = true;
+        if (all != nil && all.count > 0) {
+          isThreeFinger = (all.count == 3);
         }
       }
     }
+  }
+
+  // Fall back to gesture metadata when NSEvent touches are not exposed
+  if (!isThreeFinger) {
+    isThreeFinger = deskflow::isThreeFingerDragMetadata(type, fields);
   }
 
   if (isThreeFinger) {
@@ -1885,17 +1890,19 @@ void OSXComputer::handleThreeFingerDrag(
     if (dx != 0 || dy != 0) {
       sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(dx, dy));
     }
-  } else {
-    if (m_threeFingerDragging) {
-      if (deskflow::isGesturePhaseEnded(fields.phase, true) || deskflow::isGesturePhaseCancelled(fields.phase, true) ||
-          !isThreeFinger) {
-        LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
-        m_threeFingerDragging = false;
-        m_hasLastEventPos = false;
-        onMouseButton(false, 1);
-      }
+    return true;
+  } else if (m_threeFingerDragging) {
+    if (deskflow::isGesturePhaseEnded(fields.phase) || deskflow::isGesturePhaseCancelled(fields.phase) ||
+        !isThreeFinger) {
+      LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
+      m_threeFingerDragging = false;
+      m_hasLastEventPos = false;
+      onMouseButton(false, 1);
+      return true;
     }
   }
+
+  return false;
 }
 
 // Quartz event tap support
@@ -1987,9 +1994,11 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
     deskflow::OSXPrivateGestureFields gestureFields = deskflow::readPrivateGestureFields(event);
     if (type == 30 && gestureFields.swipeType == deskflow::GestureFieldID::DockSwipeType) {
       computer->handleDockSwipe(event, gestureFields);
-    } else {
-      computer->handleThreeFingerDrag(event, type, gestureFields);
+      return nullptr;
+    } else if (computer->handleThreeFingerDrag(event, type, gestureFields)) {
+      return nullptr;
     }
+    // Swallow unrecognized gesture events while cursor is on secondary client to prevent local execution
     return nullptr;
   }
 

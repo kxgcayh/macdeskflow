@@ -36,27 +36,31 @@ bool isGesturePhaseChanged(int64_t phase)
   return (phase == 2);
 }
 
-bool isGesturePhaseEnded(int64_t phase, bool sawPhaseChanged)
+bool isGesturePhaseEnded(int64_t phase)
 {
   if (phase == 0) {
     return false;
   }
-  if (sawPhaseChanged) {
-    return (phase == 4) || ((phase & 4) != 0);
-  }
-  return (phase == 4) || (phase == 8);
+  return (phase == 4) || ((phase & 4) != 0);
 }
 
-bool isGesturePhaseCancelled(int64_t phase, bool sawPhaseChanged)
+bool isGesturePhaseCancelled(int64_t phase)
 {
   if (phase == 0) {
     return false;
   }
-  if (phase == 16 || ((phase & 16) != 0)) {
-    return true;
+  return (phase == 8) || (phase == 16) || ((phase & 8) != 0) || ((phase & 16) != 0);
+}
+
+bool isThreeFingerDragMetadata(uint32_t type, const OSXPrivateGestureFields &fields)
+{
+  if (type != 29) {
+    return false;
   }
-  if (sawPhaseChanged) {
-    return (phase == 8) || ((phase & 8) != 0);
+  if (fields.swipeType != static_cast<int64_t>(GestureFieldID::DockSwipeType)) {
+    if (fields.hidType == 27 || fields.hidType == 11) {
+      return true;
+    }
   }
   return false;
 }

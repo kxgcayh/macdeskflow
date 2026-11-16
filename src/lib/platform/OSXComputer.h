@@ -129,7 +129,7 @@ private:
 
   void sendClientKeystroke(KeyID key, KeyModifierMask mask);
   void handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields);
-  void handleThreeFingerDrag(CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields);
+  bool handleThreeFingerDrag(CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields);
 
   bool onHotKey(EventRef event) const;
 

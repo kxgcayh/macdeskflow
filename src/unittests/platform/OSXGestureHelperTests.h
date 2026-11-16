@@ -18,5 +18,6 @@ private Q_SLOTS:
   void classifyFallbackZeroAxis();
   void keystrokeMapping();
   void gesturePhases();
+  void threeFingerDragMetadata();
   void nullEventSafe();
 };
