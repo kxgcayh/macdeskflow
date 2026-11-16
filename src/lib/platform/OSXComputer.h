@@ -20,6 +20,7 @@
 #include <mach/mach_interface.h>
 #include <mach/mach_port.h>
 
+#include <atomic>
 #include <bitset>
 #include <map>
 #include <memory>
@@ -130,6 +131,8 @@ private:
   void sendClientKeystroke(KeyID key, KeyModifierMask mask);
   void handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields);
   bool handleThreeFingerDrag(CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields);
+  void startDrag();
+  void cancelDrag();
 
   bool onHotKey(EventRef event) const;
 
@@ -312,15 +315,10 @@ private:
   bool m_logVerbose = false;
 
   // Trackpad gesture and dock swipe tracking
-  bool m_swipeActive = false;
-  bool m_swipeSawChanged = false;
-  int64_t m_swipeAxis = 0;
-  double m_swipeProgress = 0.0;
-  double m_swipeVelocityX = 0.0;
-  double m_swipeVelocityY = 0.0;
+  deskflow::OSXDockSwipeTracker m_swipeTracker;
 
   // Three-finger drag tracking
-  bool m_threeFingerDragging = false;
+  std::atomic<bool> m_threeFingerDragging{false};
   CGPoint m_lastEventPos = CGPointZero;
   bool m_hasLastEventPos = false;
 

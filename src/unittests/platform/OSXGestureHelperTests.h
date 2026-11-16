@@ -13,11 +13,12 @@ class OSXGestureHelperTests : public QObject
   Q_OBJECT
 
 private Q_SLOTS:
-  void classifyHorizontalSwipes();
-  void classifyVerticalSwipes();
-  void classifyFallbackZeroAxis();
+  void classifyAllFourSwipeDirections();
+  void classifyVelocityTieBreaker();
+  void classifyInvalidAxisAndZeroMovement();
   void keystrokeMapping();
-  void gesturePhases();
-  void threeFingerDragMetadata();
+  void gesturePhasesHierarchy();
+  void threeFingerDragGestureFilter();
+  void dockSwipeStateMachine();
   void nullEventSafe();
 };

@@ -751,6 +751,8 @@ void OSXComputer::enable()
 
 void OSXComputer::disable()
 {
+  cancelDrag();
+  m_swipeTracker.reset();
   showCursor();
 
   // FIXME -- stop watching jump zones, stop capturing input
@@ -793,11 +795,8 @@ void OSXComputer::disable()
 void OSXComputer::enter()
 {
   m_isOnComputer = true;
-  m_hasLastEventPos = false;
-  if (m_threeFingerDragging) {
-    m_threeFingerDragging = false;
-    onMouseButton(false, 1);
-  }
+  cancelDrag();
+  m_swipeTracker.reset();
   showCursor();
 
   if (m_isPrimary) {
@@ -839,14 +838,8 @@ void OSXComputer::leave()
 
   // now off computer
   m_isOnComputer = false;
-  m_swipeActive = false;
-  m_swipeSawChanged = false;
-  m_swipeAxis = 0;
-  m_hasLastEventPos = false;
-  if (m_threeFingerDragging) {
-    m_threeFingerDragging = false;
-    onMouseButton(false, 1);
-  }
+  m_swipeTracker.reset();
+  cancelDrag();
 }
 
 bool OSXComputer::setClipboard(ClipboardID, const IClipboard *src)
@@ -1731,89 +1724,51 @@ void OSXComputer::sendClientKeystroke(KeyID key, KeyModifierMask mask)
   m_events->addEvent(Event(EventTypes::KeyStateKeyUp, getEventTarget(), IKeyState::KeyInfo::alloc(key, mask, 0, 1)));
 }
 
+void OSXComputer::startDrag()
+{
+  if (!m_threeFingerDragging.exchange(true)) {
+    m_hasLastEventPos = false;
+    LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
+    onMouseButton(true, 1);
+  }
+}
+
+void OSXComputer::cancelDrag()
+{
+  if (m_threeFingerDragging.exchange(false)) {
+    LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
+    m_hasLastEventPos = false;
+    onMouseButton(false, 1);
+  }
+}
+
 void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields)
 {
-  if (deskflow::isGesturePhaseCancelled(fields.phase)) {
-    if (m_swipeActive) {
-      LOG_VERBOSE("dock swipe cancelled");
-      m_swipeActive = false;
-      m_swipeSawChanged = false;
-      m_swipeAxis = 0;
-      m_swipeProgress = 0.0;
-      m_swipeVelocityX = 0.0;
-      m_swipeVelocityY = 0.0;
+  deskflow::OSXSwipeDirection dir = deskflow::OSXSwipeDirection::None;
+  if (m_swipeTracker.processEvent(fields, dir)) {
+    KeyID key = kKeyNone;
+    KeyModifierMask mask = 0;
+    if (deskflow::getKeystrokeForSwipe(dir, key, mask)) {
+      LOG_VERBOSE("dock swipe ended: direction=%s, sending keystroke to client", deskflow::swipeDirectionToString(dir));
+      sendClientKeystroke(key, mask);
     }
-  } else if (deskflow::isGesturePhaseBegan(fields.phase)) {
-    m_swipeActive = true;
-    m_swipeSawChanged = false;
-    m_swipeAxis = fields.motionAxis;
-    m_swipeProgress = fields.progress;
-    m_swipeVelocityX = fields.velocityX;
-    m_swipeVelocityY = fields.velocityY;
+  } else if (deskflow::isGesturePhaseEnded(fields.phase)) {
     LOG_VERBOSE(
-        "dock swipe began: axis=%lld, progress=%f, velX=%f, velY=%f", (long long)m_swipeAxis, m_swipeProgress,
-        m_swipeVelocityX, m_swipeVelocityY
+        "dock swipe ended without valid direction (axis=%lld, progress=%f, velocity=%f)", (long long)fields.motionAxis,
+        fields.progress, fields.velocity
+    );
+  } else if (deskflow::isGesturePhaseCancelled(fields.phase)) {
+    LOG_VERBOSE("dock swipe cancelled");
+  } else if (deskflow::isGesturePhaseBegan(fields.phase)) {
+    LOG_VERBOSE(
+        "dock swipe began: axis=%lld, progress=%f, velocity=%f", (long long)fields.motionAxis, fields.progress,
+        fields.velocity
     );
   } else if (deskflow::isGesturePhaseChanged(fields.phase)) {
-    m_swipeActive = true;
-    m_swipeSawChanged = true;
-    if (fields.motionAxis != 0) {
-      m_swipeAxis = fields.motionAxis;
-    }
-    if (std::abs(fields.progress) > 0.001) {
-      m_swipeProgress = fields.progress;
-    }
-    if (std::abs(fields.velocityX) > 0.001) {
-      m_swipeVelocityX = fields.velocityX;
-    }
-    if (std::abs(fields.velocityY) > 0.001) {
-      m_swipeVelocityY = fields.velocityY;
-    }
     LOG_VERBOSE(
-        "dock swipe changed: axis=%lld, progress=%f, velX=%f, velY=%f", (long long)m_swipeAxis, m_swipeProgress,
-        m_swipeVelocityX, m_swipeVelocityY
+        "dock swipe changed: axis=%lld, progress=%f, velocity=%f", (long long)fields.motionAxis, fields.progress,
+        fields.velocity
     );
-  } else if (deskflow::isGesturePhaseEnded(fields.phase)) {
-    if (m_swipeActive) {
-      if (fields.motionAxis != 0) {
-        m_swipeAxis = fields.motionAxis;
-      }
-      if (std::abs(fields.progress) > 0.001) {
-        m_swipeProgress = fields.progress;
-      }
-      if (std::abs(fields.velocityX) > 0.001) {
-        m_swipeVelocityX = fields.velocityX;
-      }
-      if (std::abs(fields.velocityY) > 0.001) {
-        m_swipeVelocityY = fields.velocityY;
-      }
-
-      deskflow::OSXSwipeDirection dir =
-          deskflow::classifySwipeDirection(m_swipeAxis, m_swipeProgress, m_swipeVelocityX, m_swipeVelocityY);
-      if (dir != deskflow::OSXSwipeDirection::None) {
-        KeyID key = kKeyNone;
-        KeyModifierMask mask = 0;
-        if (deskflow::getKeystrokeForSwipe(dir, key, mask)) {
-          LOG_VERBOSE(
-              "dock swipe ended: direction=%s (axis=%lld, progress=%f, velX=%f, velY=%f), sending keystroke to client",
-              deskflow::swipeDirectionToString(dir), (long long)m_swipeAxis, m_swipeProgress, m_swipeVelocityX,
-              m_swipeVelocityY
-          );
-          sendClientKeystroke(key, mask);
-        }
-      } else {
-        LOG_VERBOSE(
-            "dock swipe ended but direction unclassified (axis=%lld, progress=%f, velX=%f, velY=%f)",
-            (long long)m_swipeAxis, m_swipeProgress, m_swipeVelocityX, m_swipeVelocityY
-        );
-      }
-      m_swipeActive = false;
-      m_swipeSawChanged = false;
-      m_swipeAxis = 0;
-      m_swipeProgress = 0.0;
-      m_swipeVelocityX = 0.0;
-      m_swipeVelocityY = 0.0;
-    }
   }
 }
 
@@ -1821,88 +1776,93 @@ bool OSXComputer::handleThreeFingerDrag(
     CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields
 )
 {
-  bool isThreeFinger = false;
+  // 1. Terminal phases (Ended or Cancelled) must be processed before active-drag branch
+  if (deskflow::isGesturePhaseEnded(fields.phase) || deskflow::isGesturePhaseCancelled(fields.phase)) {
+    if (m_threeFingerDragging.load()) {
+      LOG_VERBOSE("three-finger drag ended: releasing button 1 (phase=%lld)", (long long)fields.phase);
+      cancelDrag();
+      return true;
+    }
+    return false;
+  }
+
+  // 2. Query touch count if NSEvent is available
+  int touchCount = -1;
   @autoreleasepool {
     NSEvent *nsEvent = [NSEvent eventWithCGEvent:event];
     if (nsEvent != nil) {
       NSSet<NSTouch *> *touching = [nsEvent touchesMatchingPhase:NSTouchPhaseTouching inView:nil];
       if (touching != nil && touching.count > 0) {
-        isThreeFinger = (touching.count == 3);
+        touchCount = static_cast<int>(touching.count);
       } else {
         NSSet<NSTouch *> *all = [nsEvent allTouches];
         if (all != nil && all.count > 0) {
-          isThreeFinger = (all.count == 3);
+          touchCount = static_cast<int>(all.count);
         }
       }
     }
   }
 
-  // Fall back to gesture metadata when NSEvent touches are not exposed
-  if (!isThreeFinger) {
-    isThreeFinger = deskflow::isThreeFingerDragMetadata(type, fields);
+  bool isDragGesture = deskflow::isThreeFingerDragGesture(type, fields, touchCount);
+
+  if (!m_threeFingerDragging.load()) {
+    if (!isDragGesture) {
+      return false;
+    }
+    startDrag();
+  } else {
+    // If drag is active but touch count changed to non-3, or swipe gesture started, release button
+    if ((touchCount > 0 && touchCount != 3) || fields.swipeType != 0 || fields.motionAxis != 0) {
+      LOG_VERBOSE(
+          "three-finger drag interrupted (touchCount=%d, swipeType=%lld, axis=%lld): releasing drag", touchCount,
+          (long long)fields.swipeType, (long long)fields.motionAxis
+      );
+      cancelDrag();
+      return false;
+    }
   }
 
-  if (isThreeFinger) {
-    if (!m_threeFingerDragging) {
-      m_threeFingerDragging = true;
-      m_hasLastEventPos = false;
-      LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
-      onMouseButton(true, 1);
-    }
-
-    int32_t dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
-    int32_t dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
-    if (dx == 0 && dy == 0) {
-      double unaccelX =
-          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
-      double unaccelY =
-          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
-      if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
-        dx = (int32_t)std::round(unaccelX);
-        dy = (int32_t)std::round(unaccelY);
-        if (dx == 0 && unaccelX != 0.0) {
-          dx = (unaccelX > 0.0) ? 1 : -1;
-        }
-        if (dy == 0 && unaccelY != 0.0) {
-          dy = (unaccelY > 0.0) ? 1 : -1;
-        }
-        LOG_VERBOSE(
-            "three-finger drag delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY
-        );
-      } else {
-        CGPoint pos = CGEventGetLocation(event);
-        if (m_hasLastEventPos) {
-          dx = (int32_t)std::round(pos.x - m_lastEventPos.x);
-          dy = (int32_t)std::round(pos.y - m_lastEventPos.y);
-          if (dx != 0 || dy != 0) {
-            LOG_VERBOSE("three-finger drag delta from position diffs: %+d,%+d", dx, dy);
-          }
-        }
-        m_lastEventPos = pos;
-        m_hasLastEventPos = true;
+  int32_t dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+  int32_t dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+  if (dx == 0 && dy == 0) {
+    double unaccelX =
+        CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
+    double unaccelY =
+        CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
+    if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
+      dx = (int32_t)std::round(unaccelX);
+      dy = (int32_t)std::round(unaccelY);
+      if (dx == 0 && unaccelX != 0.0) {
+        dx = (unaccelX > 0.0) ? 1 : -1;
       }
+      if (dy == 0 && unaccelY != 0.0) {
+        dy = (unaccelY > 0.0) ? 1 : -1;
+      }
+      LOG_VERBOSE(
+          "three-finger drag delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY
+      );
     } else {
-      m_lastEventPos = CGEventGetLocation(event);
+      CGPoint pos = CGEventGetLocation(event);
+      if (m_hasLastEventPos) {
+        dx = (int32_t)std::round(pos.x - m_lastEventPos.x);
+        dy = (int32_t)std::round(pos.y - m_lastEventPos.y);
+        if (dx != 0 || dy != 0) {
+          LOG_VERBOSE("three-finger drag delta from position diffs: %+d,%+d", dx, dy);
+        }
+      }
+      m_lastEventPos = pos;
       m_hasLastEventPos = true;
-      LOG_VERBOSE("three-finger drag delta from event: %+d,%+d", dx, dy);
     }
-
-    if (dx != 0 || dy != 0) {
-      sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(dx, dy));
-    }
-    return true;
-  } else if (m_threeFingerDragging) {
-    if (deskflow::isGesturePhaseEnded(fields.phase) || deskflow::isGesturePhaseCancelled(fields.phase) ||
-        !isThreeFinger) {
-      LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
-      m_threeFingerDragging = false;
-      m_hasLastEventPos = false;
-      onMouseButton(false, 1);
-      return true;
-    }
+  } else {
+    m_lastEventPos = CGEventGetLocation(event);
+    m_hasLastEventPos = true;
+    LOG_VERBOSE("three-finger drag delta from event: %+d,%+d", dx, dy);
   }
 
-  return false;
+  if (dx != 0 || dy != 0) {
+    sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(dx, dy));
+  }
+  return true;
 }
 
 // Quartz event tap support
@@ -2033,6 +1993,7 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
     computer->onKey(event);
     break;
   case kCGEventTapDisabledByTimeout:
+    computer->cancelDrag();
     // Re-enable our event-tap if we still have accessibility permissions
     if (computer->checkAXPermissions()) {
       CGEventTapEnable(computer->m_eventTapPort, true);
@@ -2040,6 +2001,7 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
     }
     break;
   case kCGEventTapDisabledByUserInput:
+    computer->cancelDrag();
     LOG_ERR("quartz event tap was disabled by user input");
     break;
   case NX_NULLEVENT:

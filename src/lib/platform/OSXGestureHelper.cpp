@@ -18,66 +18,73 @@ OSXPrivateGestureFields readPrivateGestureFields(CGEventRef event)
   fields.hidType = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::HIDType));
   fields.swipeType = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::SwipeType));
   fields.progress = CGEventGetDoubleValueField(event, static_cast<CGEventField>(GestureFieldID::Progress));
-  fields.velocityX = CGEventGetDoubleValueField(event, static_cast<CGEventField>(GestureFieldID::VelocityX));
-  fields.velocityY = CGEventGetDoubleValueField(event, static_cast<CGEventField>(GestureFieldID::VelocityY));
+  fields.velocity = CGEventGetDoubleValueField(event, static_cast<CGEventField>(GestureFieldID::Velocity));
   fields.phase = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::Phase));
   fields.motionAxis = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::MotionAxis));
 
   return fields;
 }
 
-bool isGesturePhaseBegan(int64_t phase)
+bool isGesturePhaseCancelled(int64_t phase)
 {
-  return (phase == 1) || ((phase & 1) != 0);
-}
-
-bool isGesturePhaseChanged(int64_t phase)
-{
-  return (phase == 2);
+  if (phase <= 0) {
+    return false;
+  }
+  return (phase & (GesturePhase::Cancelled | GesturePhase::CancelledNSEvent)) != 0;
 }
 
 bool isGesturePhaseEnded(int64_t phase)
 {
-  if (phase == 0) {
+  if (phase <= 0 || isGesturePhaseCancelled(phase)) {
     return false;
   }
-  return (phase == 4) || ((phase & 4) != 0);
+  return (phase & GesturePhase::Ended) != 0;
 }
 
-bool isGesturePhaseCancelled(int64_t phase)
+bool isGesturePhaseChanged(int64_t phase)
 {
-  if (phase == 0) {
+  if (phase <= 0 || isGesturePhaseCancelled(phase) || isGesturePhaseEnded(phase)) {
     return false;
   }
-  return (phase == 8) || (phase == 16) || ((phase & 8) != 0) || ((phase & 16) != 0);
+  return (phase & GesturePhase::Changed) != 0;
 }
 
-bool isThreeFingerDragMetadata(uint32_t type, const OSXPrivateGestureFields &fields)
+bool isGesturePhaseBegan(int64_t phase)
+{
+  if (phase <= 0 || isGesturePhaseCancelled(phase) || isGesturePhaseEnded(phase) || isGesturePhaseChanged(phase)) {
+    return false;
+  }
+  return (phase & GesturePhase::Began) != 0;
+}
+
+bool isThreeFingerDragGesture(uint32_t type, const OSXPrivateGestureFields &fields, int touchCount)
 {
   if (type != 29) {
     return false;
   }
-  if (fields.swipeType != static_cast<int64_t>(GestureFieldID::DockSwipeType)) {
-    if (fields.hidType == 27 || fields.hidType == 11) {
-      return true;
-    }
+  // If touch count is known, it must be exactly 3.
+  if (touchCount > 0 && touchCount != 3) {
+    return false;
   }
-  return false;
+  // Must NOT be a dock swipe, navigation swipe, or axis-bound gesture.
+  if (fields.swipeType != 0 || fields.motionAxis != 0) {
+    return false;
+  }
+  // Must have fluid touch HID type (27) or digitizer (11).
+  if (fields.hidType != 27 && fields.hidType != 11) {
+    return false;
+  }
+  // Must be in began or changed phase.
+  if (!isGesturePhaseBegan(fields.phase) && !isGesturePhaseChanged(fields.phase)) {
+    return false;
+  }
+  return true;
 }
 
-OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocityX, double velocityY)
+OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocity)
 {
-  // Fall back safely if motion axis is not set: infer from velocity vector
-  if (motionAxis == 0) {
-    if (std::abs(velocityX) > std::abs(velocityY) && std::abs(velocityX) > 0.001) {
-      motionAxis = 1;
-    } else if (std::abs(velocityY) > std::abs(velocityX) && std::abs(velocityY) > 0.001) {
-      motionAxis = 2;
-    }
-  }
-
   if (motionAxis == 1) { // Horizontal swipe
-    double sign = (std::abs(velocityX) > 0.001) ? velocityX : progress;
+    double sign = (std::abs(progress) > 0.001) ? progress : velocity;
     if (sign < -0.001) {
       return OSXSwipeDirection::Left;
     }
@@ -85,7 +92,7 @@ OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, do
       return OSXSwipeDirection::Right;
     }
   } else if (motionAxis == 2) { // Vertical swipe
-    double sign = (std::abs(velocityY) > 0.001) ? velocityY : progress;
+    double sign = (std::abs(progress) > 0.001) ? progress : velocity;
     if (sign > 0.001) {
       return OSXSwipeDirection::Up;
     }
@@ -138,6 +145,90 @@ const char *swipeDirectionToString(OSXSwipeDirection direction)
   default:
     return "None";
   }
+}
+
+void OSXDockSwipeTracker::reset()
+{
+  m_active = false;
+  m_sawChanged = false;
+  m_axis = 0;
+  m_progress = 0.0;
+  m_velocity = 0.0;
+}
+
+bool OSXDockSwipeTracker::processEvent(const OSXPrivateGestureFields &fields, OSXSwipeDirection &outDirection)
+{
+  outDirection = OSXSwipeDirection::None;
+
+  if (isGesturePhaseCancelled(fields.phase)) {
+    if (m_active) {
+      reset();
+    }
+    return false;
+  }
+
+  if (isGesturePhaseBegan(fields.phase)) {
+    m_active = true;
+    m_sawChanged = false;
+    m_axis = fields.motionAxis;
+    m_progress = fields.progress;
+    m_velocity = fields.velocity;
+    return false;
+  }
+
+  if (isGesturePhaseChanged(fields.phase)) {
+    m_active = true;
+    m_sawChanged = true;
+    if (fields.motionAxis != 0) {
+      m_axis = fields.motionAxis;
+    }
+    if (std::abs(fields.progress) > 0.001) {
+      m_progress = fields.progress;
+    }
+    if (std::abs(fields.velocity) > 0.001) {
+      m_velocity = fields.velocity;
+    }
+    return false;
+  }
+
+  if (isGesturePhaseEnded(fields.phase)) {
+    if (!m_active) {
+      // Duplicate ended or ended without began: ignore
+      return false;
+    }
+
+    if (fields.motionAxis != 0) {
+      m_axis = fields.motionAxis;
+    }
+    if (std::abs(fields.progress) > 0.001) {
+      m_progress = fields.progress;
+    }
+    if (std::abs(fields.velocity) > 0.001) {
+      m_velocity = fields.velocity;
+    }
+
+    bool wasChanged = m_sawChanged;
+    double finalProgress = m_progress;
+    double finalVelocity = m_velocity;
+    int64_t finalAxis = m_axis;
+
+    reset();
+
+    // If began -> ended directly without changed, require that the ended event
+    // has a non-zero progress or velocity to establish motion.
+    if (!wasChanged && std::abs(finalProgress) <= 0.001 && std::abs(finalVelocity) <= 0.001) {
+      return false;
+    }
+
+    OSXSwipeDirection dir = classifySwipeDirection(finalAxis, finalProgress, finalVelocity);
+    if (dir != OSXSwipeDirection::None) {
+      outDirection = dir;
+      return true;
+    }
+    return false;
+  }
+
+  return false;
 }
 
 } // namespace deskflow
