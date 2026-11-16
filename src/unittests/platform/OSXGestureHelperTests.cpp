@@ -17,40 +17,40 @@ using namespace deskflow;
 void OSXGestureHelperTests::classifyAllFourSwipeDirections()
 {
   // Horizontal axis is 1: progress determines direction
-  // Progress < 0: Left
+  // Progress < 0: Left (e.g. real value -0.25)
+  QCOMPARE(classifySwipeDirection(1, -0.25, -1.20), OSXSwipeDirection::Left);
   QCOMPARE(classifySwipeDirection(1, -1.0, 0.0), OSXSwipeDirection::Left);
-  QCOMPARE(classifySwipeDirection(1, -0.05, 0.0), OSXSwipeDirection::Left);
 
   // Progress > 0: Right
+  QCOMPARE(classifySwipeDirection(1, 0.50, 2.10), OSXSwipeDirection::Right);
   QCOMPARE(classifySwipeDirection(1, 1.0, 0.0), OSXSwipeDirection::Right);
-  QCOMPARE(classifySwipeDirection(1, 0.05, 0.0), OSXSwipeDirection::Right);
 
   // Vertical axis is 2: progress determines direction
-  // Progress > 0: Up (Mission Control)
-  QCOMPARE(classifySwipeDirection(2, 1.0, 0.0), OSXSwipeDirection::Up);
-  QCOMPARE(classifySwipeDirection(2, 0.05, 0.0), OSXSwipeDirection::Up);
+  // Real hardware value: vertical with negative progress (-0.54) = swipe UP (Mission Control)
+  QCOMPARE(classifySwipeDirection(2, -0.54, -2.35), OSXSwipeDirection::Up);
+  QCOMPARE(classifySwipeDirection(2, -0.028, 0.0), OSXSwipeDirection::Up);
 
-  // Progress < 0: Down (App Exposé)
-  QCOMPARE(classifySwipeDirection(2, -1.0, 0.0), OSXSwipeDirection::Down);
-  QCOMPARE(classifySwipeDirection(2, -0.05, 0.0), OSXSwipeDirection::Down);
+  // Real hardware value: vertical with positive progress (+0.72) = swipe DOWN (App Exposé)
+  QCOMPARE(classifySwipeDirection(2, 0.72, 3.10), OSXSwipeDirection::Down);
+  QCOMPARE(classifySwipeDirection(2, 1.0, 0.0), OSXSwipeDirection::Down);
 }
 
 void OSXGestureHelperTests::classifyVelocityTieBreaker()
 {
   // When progress is approximately zero (<= 0.001), velocity acts as scalar tie-breaker
-  // Horizontal axis (1)
+  // Horizontal axis (1): negative velocity = Left, positive velocity = Right
   QCOMPARE(classifySwipeDirection(1, 0.0, -500.0), OSXSwipeDirection::Left);
   QCOMPARE(classifySwipeDirection(1, 0.0, 500.0), OSXSwipeDirection::Right);
 
-  // Vertical axis (2)
-  QCOMPARE(classifySwipeDirection(2, 0.0, 500.0), OSXSwipeDirection::Up);
-  QCOMPARE(classifySwipeDirection(2, 0.0, -500.0), OSXSwipeDirection::Down);
+  // Vertical axis (2): negative velocity = Up, positive velocity = Down
+  QCOMPARE(classifySwipeDirection(2, 0.0, -500.0), OSXSwipeDirection::Up);
+  QCOMPARE(classifySwipeDirection(2, 0.0, 500.0), OSXSwipeDirection::Down);
 
   // When progress is non-zero, progress takes precedence over velocity
-  QCOMPARE(classifySwipeDirection(1, -0.5, 500.0), OSXSwipeDirection::Left);
-  QCOMPARE(classifySwipeDirection(1, 0.5, -500.0), OSXSwipeDirection::Right);
-  QCOMPARE(classifySwipeDirection(2, 0.5, -500.0), OSXSwipeDirection::Up);
-  QCOMPARE(classifySwipeDirection(2, -0.5, 500.0), OSXSwipeDirection::Down);
+  QCOMPARE(classifySwipeDirection(1, -0.25, 500.0), OSXSwipeDirection::Left);
+  QCOMPARE(classifySwipeDirection(1, 0.50, -500.0), OSXSwipeDirection::Right);
+  QCOMPARE(classifySwipeDirection(2, -0.54, 500.0), OSXSwipeDirection::Up);
+  QCOMPARE(classifySwipeDirection(2, 0.72, -500.0), OSXSwipeDirection::Down);
 }
 
 void OSXGestureHelperTests::classifyInvalidAxisAndZeroMovement()
@@ -157,7 +157,7 @@ void OSXGestureHelperTests::threeFingerDragGestureFilter()
 {
   OSXPrivateGestureFields fields;
   fields.hidType = 27; // Fluid touch
-  fields.swipeType = 0;
+  fields.swipeMotionAxis = 0;
   fields.motionAxis = 0;
   fields.phase = GesturePhase::Began;
 
@@ -184,17 +184,20 @@ void OSXGestureHelperTests::threeFingerDragGestureFilter()
   QVERIFY(!isThreeFingerDragGesture(30, fields, 3));
   QVERIFY(!isThreeFingerDragGesture(1, fields, 3));
 
-  // Dock swipe (swipeType 23) must never be treated as drag
-  fields.swipeType = 23;
+  // Dock swipe (hidType 23) must never be treated as drag
+  fields.hidType = 23;
   QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
-  fields.swipeType = 0;
+  fields.hidType = 27;
 
-  // Axis-bound swipe (motionAxis != 0) must never be treated as drag
+  // Axis-bound swipe (motionAxis != 0 or swipeMotionAxis != 0) must never be treated as drag
   fields.motionAxis = 1;
   QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
   fields.motionAxis = 2;
   QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
   fields.motionAxis = 0;
+  fields.swipeMotionAxis = 1;
+  QVERIFY(!isThreeFingerDragGesture(29, fields, 3));
+  fields.swipeMotionAxis = 0;
 
   // Terminal phases (Ended or Cancelled) must not be treated as active drag
   fields.phase = GesturePhase::Ended;
@@ -289,40 +292,118 @@ void OSXGestureHelperTests::dockSwipeStateMachine()
   QCOMPARE(dir, OSXSwipeDirection::None);
   QVERIFY(!tracker.isActive());
 
-  // 2. Began -> Cancelled: resets state, sends nothing
-  QVERIFY(!tracker.processEvent(began, dir));
+  // 2. Real vertical sequence: begin -0.028, end -0.54 vertical = Up
+  OSXPrivateGestureFields beganUp;
+  beganUp.phase = GesturePhase::Began;
+  beganUp.motionAxis = 2;
+  beganUp.progress = -0.028473;
+  beganUp.velocity = 0.0;
+  QVERIFY(!tracker.processEvent(beganUp, dir));
   QVERIFY(tracker.isActive());
-
-  OSXPrivateGestureFields cancelled;
-  cancelled.phase = GesturePhase::Cancelled;
-  QVERIFY(!tracker.processEvent(cancelled, dir));
-  QVERIFY(!tracker.isActive());
-  QCOMPARE(dir, OSXSwipeDirection::None);
-
-  // 3. Changed -> Ended (valid swipe Up)
-  QVERIFY(!tracker.processEvent(began, dir));
 
   OSXPrivateGestureFields changedUp;
   changedUp.phase = GesturePhase::Changed;
   changedUp.motionAxis = 2;
-  changedUp.progress = 0.8;
-  changedUp.velocity = 200.0;
+  changedUp.progress = -0.362259;
+  changedUp.velocity = 0.0;
   QVERIFY(!tracker.processEvent(changedUp, dir));
   QVERIFY(tracker.sawChanged());
 
   OSXPrivateGestureFields endedUp;
   endedUp.phase = GesturePhase::Ended;
   endedUp.motionAxis = 2;
-  endedUp.progress = 1.0;
-  endedUp.velocity = 0.0;
+  endedUp.progress = -0.540726;
+  endedUp.velocity = -2.348709;
   QVERIFY(tracker.processEvent(endedUp, dir));
   QCOMPARE(dir, OSXSwipeDirection::Up);
   QVERIFY(!tracker.isActive());
 
-  // 4. Duplicate Ended: must be ignored
+  // 3. Real vertical sequence: end +0.72 vertical = Down
+  OSXPrivateGestureFields beganDown;
+  beganDown.phase = GesturePhase::Began;
+  beganDown.motionAxis = 2;
+  beganDown.progress = 0.03;
+  QVERIFY(!tracker.processEvent(beganDown, dir));
+
+  OSXPrivateGestureFields changedDown;
+  changedDown.phase = GesturePhase::Changed;
+  changedDown.motionAxis = 2;
+  changedDown.progress = 0.45;
+  QVERIFY(!tracker.processEvent(changedDown, dir));
+
+  OSXPrivateGestureFields endedDown;
+  endedDown.phase = GesturePhase::Ended;
+  endedDown.motionAxis = 2;
+  endedDown.progress = 0.72;
+  endedDown.velocity = 3.10;
+  QVERIFY(tracker.processEvent(endedDown, dir));
+  QCOMPARE(dir, OSXSwipeDirection::Down);
+  QVERIFY(!tracker.isActive());
+
+  // 4. Real horizontal sequence: horizontal end -0.25 = Left
+  OSXPrivateGestureFields beganLeft;
+  beganLeft.phase = GesturePhase::Began;
+  beganLeft.motionAxis = 1;
+  beganLeft.progress = -0.05;
+  QVERIFY(!tracker.processEvent(beganLeft, dir));
+
+  OSXPrivateGestureFields changedLeft;
+  changedLeft.phase = GesturePhase::Changed;
+  changedLeft.motionAxis = 1;
+  changedLeft.progress = -0.15;
+  QVERIFY(!tracker.processEvent(changedLeft, dir));
+
+  OSXPrivateGestureFields endedLeft;
+  endedLeft.phase = GesturePhase::Ended;
+  endedLeft.motionAxis = 1;
+  endedLeft.progress = -0.25;
+  endedLeft.velocity = -1.20;
+  QVERIFY(tracker.processEvent(endedLeft, dir));
+  QCOMPARE(dir, OSXSwipeDirection::Left);
+  QVERIFY(!tracker.isActive());
+
+  // 5. Cancelled (8) sends nothing
+  OSXPrivateGestureFields beganCancel;
+  beganCancel.phase = GesturePhase::Began;
+  beganCancel.motionAxis = 2;
+  beganCancel.progress = -0.028;
+  QVERIFY(!tracker.processEvent(beganCancel, dir));
+  QVERIFY(tracker.isActive());
+
+  OSXPrivateGestureFields cancelled;
+  cancelled.phase = 8;
+  QVERIFY(!tracker.processEvent(cancelled, dir));
+  QVERIFY(!tracker.isActive());
+  QCOMPARE(dir, OSXSwipeDirection::None);
+
+  // 6. Axis fallback: field 165 is 0, field 123 is 2 -> vertical Up
+  OSXPrivateGestureFields beganFallback;
+  beganFallback.phase = GesturePhase::Began;
+  beganFallback.motionAxis = 0;
+  beganFallback.swipeMotionAxis = 2;
+  beganFallback.progress = -0.028;
+  QVERIFY(!tracker.processEvent(beganFallback, dir));
+
+  OSXPrivateGestureFields changedFallback;
+  changedFallback.phase = GesturePhase::Changed;
+  changedFallback.motionAxis = 0;
+  changedFallback.swipeMotionAxis = 2;
+  changedFallback.progress = -0.36;
+  QVERIFY(!tracker.processEvent(changedFallback, dir));
+
+  OSXPrivateGestureFields endedFallback;
+  endedFallback.phase = GesturePhase::Ended;
+  endedFallback.motionAxis = 0;
+  endedFallback.swipeMotionAxis = 2;
+  endedFallback.progress = -0.54;
+  QVERIFY(tracker.processEvent(endedFallback, dir));
+  QCOMPARE(dir, OSXSwipeDirection::Up);
+  QVERIFY(!tracker.isActive());
+
+  // 7. Duplicate Ended: must be ignored
   QVERIFY(!tracker.processEvent(endedUp, dir));
 
-  // 5. Ended without Began: must be ignored
+  // 8. Ended without Began: must be ignored
   tracker.reset();
   QVERIFY(!tracker.processEvent(endedUp, dir));
 }
@@ -331,7 +412,7 @@ void OSXGestureHelperTests::nullEventSafe()
 {
   OSXPrivateGestureFields fields = readPrivateGestureFields(nullptr);
   QCOMPARE(fields.hidType, 0LL);
-  QCOMPARE(fields.swipeType, 0LL);
+  QCOMPARE(fields.swipeMotionAxis, 0LL);
   QCOMPARE(fields.progress, 0.0);
   QCOMPARE(fields.velocity, 0.0);
   QCOMPARE(fields.phase, 0LL);

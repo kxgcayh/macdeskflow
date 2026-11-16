@@ -1820,10 +1820,11 @@ bool OSXComputer::handleThreeFingerDrag(
       onMouseButton(true, 1);
     } else {
       // If drag is active but touch count changed to non-3, or swipe gesture started, release button
-      if ((touchCount > 0 && touchCount != 3) || fields.swipeType != 0 || fields.motionAxis != 0) {
+      if ((touchCount > 0 && touchCount != 3) || fields.swipeMotionAxis != 0 || fields.motionAxis != 0 ||
+          fields.hidType == 23) {
         LOG_VERBOSE(
-            "three-finger drag interrupted (touchCount=%d, swipeType=%lld, axis=%lld): releasing drag", touchCount,
-            (long long)fields.swipeType, (long long)fields.motionAxis
+            "three-finger drag interrupted (touchCount=%d, swipeAxis=%lld, axis=%lld): releasing drag", touchCount,
+            (long long)fields.swipeMotionAxis, (long long)fields.motionAxis
         );
         m_dragTracker.cancelDragUnlocked();
         onMouseButton(false, 1);
@@ -1960,7 +1961,7 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
 
   if (computer != nullptr && !computer->m_isOnComputer && event != nullptr && (type == 29 || type == 30)) {
     deskflow::OSXPrivateGestureFields gestureFields = deskflow::readPrivateGestureFields(event);
-    if (type == 30 && gestureFields.swipeType == deskflow::GestureFieldID::DockSwipeType) {
+    if (type == 30 && gestureFields.hidType == 23) {
       computer->handleDockSwipe(event, gestureFields);
       return nullptr;
     } else if (computer->handleThreeFingerDrag(event, type, gestureFields)) {

@@ -16,11 +16,17 @@ OSXPrivateGestureFields readPrivateGestureFields(CGEventRef event)
   }
 
   fields.hidType = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::HIDType));
-  fields.swipeType = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::SwipeType));
+  fields.swipeMotionAxis =
+      CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::SwipeMotionAxis));
   fields.progress = CGEventGetDoubleValueField(event, static_cast<CGEventField>(GestureFieldID::Progress));
   fields.velocity = CGEventGetDoubleValueField(event, static_cast<CGEventField>(GestureFieldID::Velocity));
   fields.phase = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::Phase));
   fields.motionAxis = CGEventGetIntegerValueField(event, static_cast<CGEventField>(GestureFieldID::MotionAxis));
+
+  // Fall back to field 123 when field 165 is 0
+  if (fields.motionAxis == 0) {
+    fields.motionAxis = fields.swipeMotionAxis;
+  }
 
   return fields;
 }
@@ -67,7 +73,7 @@ bool isThreeFingerDragGesture(uint32_t type, const OSXPrivateGestureFields &fiel
     return false;
   }
   // Must NOT be a dock swipe, navigation swipe, or axis-bound gesture.
-  if (fields.swipeType != 0 || fields.motionAxis != 0) {
+  if (fields.swipeMotionAxis != 0 || fields.motionAxis != 0 || fields.hidType == 23) {
     return false;
   }
   // Must have fluid touch HID type (27) or digitizer (11).
@@ -92,11 +98,12 @@ OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, do
       return OSXSwipeDirection::Right;
     }
   } else if (motionAxis == 2) { // Vertical swipe
+    // Negative progress = swipe UP (Mission Control); positive progress = swipe DOWN (App Exposé)
     double sign = (std::abs(progress) > 0.001) ? progress : velocity;
-    if (sign > 0.001) {
+    if (sign < -0.001) {
       return OSXSwipeDirection::Up;
     }
-    if (sign < -0.001) {
+    if (sign > 0.001) {
       return OSXSwipeDirection::Down;
     }
   }
@@ -167,10 +174,12 @@ bool OSXDockSwipeTracker::processEvent(const OSXPrivateGestureFields &fields, OS
     return false;
   }
 
+  int64_t axis = (fields.motionAxis != 0) ? fields.motionAxis : fields.swipeMotionAxis;
+
   if (isGesturePhaseBegan(fields.phase)) {
     m_active = true;
     m_sawChanged = false;
-    m_axis = fields.motionAxis;
+    m_axis = axis;
     m_progress = fields.progress;
     m_velocity = fields.velocity;
     return false;
@@ -179,8 +188,8 @@ bool OSXDockSwipeTracker::processEvent(const OSXPrivateGestureFields &fields, OS
   if (isGesturePhaseChanged(fields.phase)) {
     m_active = true;
     m_sawChanged = true;
-    if (fields.motionAxis != 0) {
-      m_axis = fields.motionAxis;
+    if (axis != 0) {
+      m_axis = axis;
     }
     if (std::abs(fields.progress) > 0.001) {
       m_progress = fields.progress;
@@ -197,8 +206,8 @@ bool OSXDockSwipeTracker::processEvent(const OSXPrivateGestureFields &fields, OS
       return false;
     }
 
-    if (fields.motionAxis != 0) {
-      m_axis = fields.motionAxis;
+    if (axis != 0) {
+      m_axis = axis;
     }
     if (std::abs(fields.progress) > 0.001) {
       m_progress = fields.progress;

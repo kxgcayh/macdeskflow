@@ -17,19 +17,19 @@ namespace deskflow {
 
 // Private CoreGraphics / SkyLight event field IDs for trackpad gestures.
 // Undocumented SPI fields used by macOS WindowServer and Dock:
-//   110: kCGEventGestureHIDType (e.g. 23 = kIOHIDEventTypeDockSwipe, 27 = fluid touch)
-//   123: kCGEventGestureSwipeMotion / swipe type (23 = dock swipe)
+//   110: kCGEventGestureHIDType (HID type: 23 = dock swipe, 27 = fluid touch)
+//   123: kCGEventGestureSwipeMotionAxis (swipe motion axis: 1 = horizontal, 2 = vertical)
 //   124: kCGEventGestureSwipeProgress (scalar progress along motion axis)
 //   125: kCGEventGestureSwipePositionX
 //   126: kCGEventGestureSwipePositionY
 //   129: kCGEventGestureSwipeVelocity (scalar velocity along motion axis)
 //   132: kCGEventGesturePhase (CGSGesturePhase bitmask/values: 1=began, 2=changed, 4=ended, 8=cancelled)
-//   165: kCGEventGestureMotionAxis (1=horizontal, 2=vertical)
+//   165: kCGEventGestureMotionAxis (motion axis: 1=horizontal, 2=vertical)
 //   170: kCGEventUnacceleratedPointerMovementX (raw horizontal delta)
 //   171: kCGEventUnacceleratedPointerMovementY (raw vertical delta)
 namespace GestureFieldID {
 constexpr uint32_t HIDType = 110;
-constexpr uint32_t SwipeType = 123;
+constexpr uint32_t SwipeMotionAxis = 123;
 constexpr uint32_t Progress = 124;
 constexpr uint32_t PositionX = 125;
 constexpr uint32_t PositionY = 126;
@@ -38,7 +38,7 @@ constexpr uint32_t Phase = 132;
 constexpr uint32_t MotionAxis = 165;
 constexpr uint32_t UnacceleratedX = 170;
 constexpr uint32_t UnacceleratedY = 171;
-constexpr int64_t DockSwipeType = 23;
+constexpr int64_t DockSwipeHIDType = 23;
 } // namespace GestureFieldID
 
 namespace GesturePhase {
@@ -53,7 +53,7 @@ constexpr int64_t CancelledNSEvent = 16; // 1 << 4 (NSEventPhaseCancelled)
 struct OSXPrivateGestureFields
 {
   int64_t hidType = 0;
-  int64_t swipeType = 0;
+  int64_t swipeMotionAxis = 0;
   double progress = 0.0;
   double velocity = 0.0;
   int64_t phase = 0;
@@ -71,6 +71,7 @@ enum class OSXSwipeDirection
 
 // Reads private CoreGraphics gesture fields from CGEventRef through one small helper.
 // Falls back safely to zero values if event is null or fields read 0.
+// Axis resolution: uses field 165, falling back to field 123 when 165 is 0.
 OSXPrivateGestureFields readPrivateGestureFields(CGEventRef event);
 
 // Pure helpers for gesture phase classification.
@@ -83,13 +84,13 @@ bool isGesturePhaseCancelled(int64_t phase);
 // Classifies swipe direction based strictly on motion axis (1=horizontal, 2=vertical)
 // and sign of progress (scalar along motion axis), using velocity as a scalar tie-breaker.
 // Horizontal (axis 1): progress < 0 -> Left, progress > 0 -> Right
-// Vertical (axis 2): progress > 0 -> Up, progress < 0 -> Down
+// Vertical (axis 2): progress < 0 -> Up (Mission Control), progress > 0 -> Down (App Exposé)
 // Returns None if axis is unknown or direction cannot be determined.
 OSXSwipeDirection classifySwipeDirection(int64_t motionAxis, double progress, double velocity);
 
 // Determines if event represents a three-finger drag gesture.
 // Only returns true for began or changed phase with fluid touch HID type (27 or 11),
-// zero swipe type, zero motion axis, and touch count of 3 (or unspecified -1).
+// zero swipe motion axis, zero motion axis, hidType != 23, and touch count of 3 (or unspecified -1).
 bool isThreeFingerDragGesture(uint32_t type, const OSXPrivateGestureFields &fields, int touchCount = -1);
 
 // Maps a swipe direction to the keystroke that triggers the corresponding client action.
