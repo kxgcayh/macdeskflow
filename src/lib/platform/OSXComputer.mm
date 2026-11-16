@@ -793,6 +793,11 @@ void OSXComputer::disable()
 void OSXComputer::enter()
 {
   m_isOnComputer = true;
+  m_hasLastEventPos = false;
+  if (m_threeFingerDragging) {
+    m_threeFingerDragging = false;
+    onMouseButton(false, 1);
+  }
   showCursor();
 
   if (m_isPrimary) {
@@ -834,6 +839,14 @@ void OSXComputer::leave()
 
   // now off computer
   m_isOnComputer = false;
+  m_swipeActive = false;
+  m_swipeSawChanged = false;
+  m_swipeAxis = 0;
+  m_hasLastEventPos = false;
+  if (m_threeFingerDragging) {
+    m_threeFingerDragging = false;
+    onMouseButton(false, 1);
+  }
 }
 
 bool OSXComputer::setClipboard(ClipboardID, const IClipboard *src)
@@ -1017,6 +1030,41 @@ bool OSXComputer::onMouseMove(CGEventRef event)
     // raw deltas from the event instead of diffing position.
     int32_t dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
     int32_t dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+
+    if (dx == 0 && dy == 0) {
+      // Check whether onMouseMove gets zero deltas because the cursor is decoupled
+      // with CGAssociateMouseAndMouseCursorPosition(false). Fall back to unaccelerated
+      // fields (170/171) or position diffs.
+      double unaccelX =
+          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
+      double unaccelY =
+          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
+      if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
+        dx = (int32_t)std::round(unaccelX);
+        dy = (int32_t)std::round(unaccelY);
+        if (dx == 0 && unaccelX != 0.0) {
+          dx = (unaccelX > 0.0) ? 1 : -1;
+        }
+        if (dy == 0 && unaccelY != 0.0) {
+          dy = (unaccelY > 0.0) ? 1 : -1;
+        }
+        LOG_VERBOSE("mouse delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY);
+      } else {
+        CGPoint pos = CGEventGetLocation(event);
+        if (m_hasLastEventPos) {
+          dx = (int32_t)std::round(pos.x - m_lastEventPos.x);
+          dy = (int32_t)std::round(pos.y - m_lastEventPos.y);
+          if (dx != 0 || dy != 0) {
+            LOG_VERBOSE("mouse delta from position diffs: %+d,%+d", dx, dy);
+          }
+        }
+        m_lastEventPos = pos;
+        m_hasLastEventPos = true;
+      }
+    } else {
+      m_lastEventPos = CGEventGetLocation(event);
+      m_hasLastEventPos = true;
+    }
 
     LOG_VERBOSE("mouse delta %+d,%+d", dx, dy);
 
@@ -1676,6 +1724,180 @@ OSXComputer::handleCGInputEventSecondary(CGEventTapProxy proxy, CGEventType type
   return event;
 }
 
+void OSXComputer::sendClientKeystroke(KeyID key, KeyModifierMask mask)
+{
+  LOG_VERBOSE("sending synthetic gesture keystroke to client: key=0x%04x mask=0x%04x", key, mask);
+  m_events->addEvent(Event(EventTypes::KeyStateKeyDown, getEventTarget(), IKeyState::KeyInfo::alloc(key, mask, 0, 1)));
+  m_events->addEvent(Event(EventTypes::KeyStateKeyUp, getEventTarget(), IKeyState::KeyInfo::alloc(key, mask, 0, 1)));
+}
+
+void OSXComputer::handleDockSwipe(CGEventRef event, const deskflow::OSXPrivateGestureFields &fields)
+{
+  if (deskflow::isGesturePhaseBegan(fields.phase)) {
+    m_swipeActive = true;
+    m_swipeSawChanged = false;
+    m_swipeAxis = fields.motionAxis;
+    m_swipeProgress = fields.progress;
+    m_swipeVelocityX = fields.velocityX;
+    m_swipeVelocityY = fields.velocityY;
+    LOG_VERBOSE(
+        "dock swipe began: axis=%lld, progress=%f, velX=%f, velY=%f", (long long)m_swipeAxis, m_swipeProgress,
+        m_swipeVelocityX, m_swipeVelocityY
+    );
+  } else if (deskflow::isGesturePhaseChanged(fields.phase)) {
+    m_swipeActive = true;
+    m_swipeSawChanged = true;
+    if (fields.motionAxis != 0) {
+      m_swipeAxis = fields.motionAxis;
+    }
+    if (std::abs(fields.progress) > 0.001) {
+      m_swipeProgress = fields.progress;
+    }
+    if (std::abs(fields.velocityX) > 0.001) {
+      m_swipeVelocityX = fields.velocityX;
+    }
+    if (std::abs(fields.velocityY) > 0.001) {
+      m_swipeVelocityY = fields.velocityY;
+    }
+    LOG_VERBOSE(
+        "dock swipe changed: axis=%lld, progress=%f, velX=%f, velY=%f", (long long)m_swipeAxis, m_swipeProgress,
+        m_swipeVelocityX, m_swipeVelocityY
+    );
+  } else if (deskflow::isGesturePhaseEnded(fields.phase, m_swipeSawChanged)) {
+    if (m_swipeActive) {
+      if (fields.motionAxis != 0) {
+        m_swipeAxis = fields.motionAxis;
+      }
+      if (std::abs(fields.progress) > 0.001) {
+        m_swipeProgress = fields.progress;
+      }
+      if (std::abs(fields.velocityX) > 0.001) {
+        m_swipeVelocityX = fields.velocityX;
+      }
+      if (std::abs(fields.velocityY) > 0.001) {
+        m_swipeVelocityY = fields.velocityY;
+      }
+
+      deskflow::OSXSwipeDirection dir =
+          deskflow::classifySwipeDirection(m_swipeAxis, m_swipeProgress, m_swipeVelocityX, m_swipeVelocityY);
+      if (dir != deskflow::OSXSwipeDirection::None) {
+        KeyID key = kKeyNone;
+        KeyModifierMask mask = 0;
+        if (deskflow::getKeystrokeForSwipe(dir, key, mask)) {
+          LOG_VERBOSE(
+              "dock swipe ended: direction=%s (axis=%lld, progress=%f, velX=%f, velY=%f), sending keystroke to client",
+              deskflow::swipeDirectionToString(dir), (long long)m_swipeAxis, m_swipeProgress, m_swipeVelocityX,
+              m_swipeVelocityY
+          );
+          sendClientKeystroke(key, mask);
+        }
+      } else {
+        LOG_VERBOSE(
+            "dock swipe ended but direction unclassified (axis=%lld, progress=%f, velX=%f, velY=%f)",
+            (long long)m_swipeAxis, m_swipeProgress, m_swipeVelocityX, m_swipeVelocityY
+        );
+      }
+      m_swipeActive = false;
+      m_swipeSawChanged = false;
+      m_swipeAxis = 0;
+      m_swipeProgress = 0.0;
+      m_swipeVelocityX = 0.0;
+      m_swipeVelocityY = 0.0;
+    }
+  } else if (deskflow::isGesturePhaseCancelled(fields.phase, m_swipeSawChanged)) {
+    if (m_swipeActive) {
+      LOG_VERBOSE("dock swipe cancelled");
+      m_swipeActive = false;
+      m_swipeSawChanged = false;
+      m_swipeAxis = 0;
+      m_swipeProgress = 0.0;
+      m_swipeVelocityX = 0.0;
+      m_swipeVelocityY = 0.0;
+    }
+  }
+}
+
+void OSXComputer::handleThreeFingerDrag(
+    CGEventRef event, CGEventType type, const deskflow::OSXPrivateGestureFields &fields
+)
+{
+  bool isThreeFinger = false;
+  @autoreleasepool {
+    NSEvent *nsEvent = [NSEvent eventWithCGEvent:event];
+    if (nsEvent != nil) {
+      NSSet<NSTouch *> *touching = [nsEvent touchesMatchingPhase:NSTouchPhaseTouching inView:nil];
+      if (touching != nil && touching.count == 3) {
+        isThreeFinger = true;
+      } else {
+        NSSet<NSTouch *> *all = [nsEvent allTouches];
+        if (all != nil && all.count == 3) {
+          isThreeFinger = true;
+        }
+      }
+    }
+  }
+
+  if (isThreeFinger) {
+    if (!m_threeFingerDragging) {
+      m_threeFingerDragging = true;
+      m_hasLastEventPos = false;
+      LOG_VERBOSE("three-finger drag began: sending button-1 down to client");
+      onMouseButton(true, 1);
+    }
+
+    int32_t dx = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaX);
+    int32_t dy = (int32_t)CGEventGetIntegerValueField(event, kCGMouseEventDeltaY);
+    if (dx == 0 && dy == 0) {
+      double unaccelX =
+          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedX));
+      double unaccelY =
+          CGEventGetDoubleValueField(event, static_cast<CGEventField>(deskflow::GestureFieldID::UnacceleratedY));
+      if (std::abs(unaccelX) > 0.001 || std::abs(unaccelY) > 0.001) {
+        dx = (int32_t)std::round(unaccelX);
+        dy = (int32_t)std::round(unaccelY);
+        if (dx == 0 && unaccelX != 0.0) {
+          dx = (unaccelX > 0.0) ? 1 : -1;
+        }
+        if (dy == 0 && unaccelY != 0.0) {
+          dy = (unaccelY > 0.0) ? 1 : -1;
+        }
+        LOG_VERBOSE(
+            "three-finger drag delta from unaccelerated fields: %+d,%+d (raw: %f,%f)", dx, dy, unaccelX, unaccelY
+        );
+      } else {
+        CGPoint pos = CGEventGetLocation(event);
+        if (m_hasLastEventPos) {
+          dx = (int32_t)std::round(pos.x - m_lastEventPos.x);
+          dy = (int32_t)std::round(pos.y - m_lastEventPos.y);
+          if (dx != 0 || dy != 0) {
+            LOG_VERBOSE("three-finger drag delta from position diffs: %+d,%+d", dx, dy);
+          }
+        }
+        m_lastEventPos = pos;
+        m_hasLastEventPos = true;
+      }
+    } else {
+      m_lastEventPos = CGEventGetLocation(event);
+      m_hasLastEventPos = true;
+      LOG_VERBOSE("three-finger drag delta from event: %+d,%+d", dx, dy);
+    }
+
+    if (dx != 0 || dy != 0) {
+      sendEvent(EventTypes::PrimaryComputerMotionOnSecondary, MotionInfo::alloc(dx, dy));
+    }
+  } else {
+    if (m_threeFingerDragging) {
+      if (deskflow::isGesturePhaseEnded(fields.phase, true) || deskflow::isGesturePhaseCancelled(fields.phase, true) ||
+          !isThreeFinger) {
+        LOG_VERBOSE("three-finger drag ended: sending button-1 up to client");
+        m_threeFingerDragging = false;
+        m_hasLastEventPos = false;
+        onMouseButton(false, 1);
+      }
+    }
+  }
+}
+
 // Quartz event tap support
 static bool isMouseEventType(CGEventType type)
 {
@@ -1759,6 +1981,16 @@ CGEventRef OSXComputer::handleCGInputEvent(CGEventTapProxy proxy, CGEventType ty
       }
       LOG_VERBOSE("%s", buf);
     }
+  }
+
+  if (computer != nullptr && !computer->m_isOnComputer && event != nullptr && (type == 29 || type == 30)) {
+    deskflow::OSXPrivateGestureFields gestureFields = deskflow::readPrivateGestureFields(event);
+    if (type == 30 && gestureFields.swipeType == deskflow::GestureFieldID::DockSwipeType) {
+      computer->handleDockSwipe(event, gestureFields);
+    } else {
+      computer->handleThreeFingerDrag(event, type, gestureFields);
+    }
+    return nullptr;
   }
 
   switch (type) {
