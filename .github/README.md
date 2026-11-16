@@ -4,6 +4,13 @@
   <img alt="Deskflow" src="https://github.com/user-attachments/assets/f005b958-24df-4f4a-9bfd-4f834dae59d6">
 </picture>
 
+> [!IMPORTANT]
+>
+> **macdeskflow is an unofficial, Mac-focused fork of [Deskflow](https://github.com/deskflow/deskflow).**
+> It is not affiliated with or endorsed by the Deskflow project.
+> Report problems with macdeskflow builds in [this fork's issues](https://github.com/kxgcayh/macdeskflow/issues), not to the Deskflow team.
+> Mac improvements made here are offered upstream to Deskflow where they fit.
+
 **Deskflow** is a free and open source keyboard and mouse sharing app.
 Use the keyboard, mouse, or trackpad of one computer to control nearby computers,
 and work seamlessly between them.
