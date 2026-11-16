@@ -174,10 +174,10 @@ io_connect_t getEventDriver()
   return sEventDrvrRef;
 }
 
-bool isModifier(uint8_t virtualKey)
+bool isModifier(CGKeyCode virtualKey)
 {
-  static std::set<uint8_t> modifiers{s_shiftVK,      s_controlVK,      s_altVK,      s_superVK,     s_capsLockVK,
-                                     s_shiftRightVK, s_controlRightVK, s_altRightVK, s_superRightVK};
+  static const std::set<CGKeyCode> modifiers{s_shiftVK,      s_controlVK,      s_altVK,      s_superVK,     s_capsLockVK,
+                                             s_shiftRightVK, s_controlRightVK, s_altRightVK, s_superRightVK};
 
   return (modifiers.find(virtualKey) != modifiers.end());
 }
@@ -592,6 +592,54 @@ CGEventFlags OSXKeyState::getKeyboardEventFlags() const
   return modifiers;
 }
 
+CGEventFlags OSXKeyState::getSyntheticFlagsForVirtualKey(CGKeyCode virtualKey)
+{
+  switch (virtualKey) {
+  case kVK_LeftArrow:
+  case kVK_RightArrow:
+  case kVK_DownArrow:
+  case kVK_UpArrow:
+  case kVK_Home:
+  case kVK_End:
+  case kVK_PageUp:
+  case kVK_PageDown:
+  case kVK_Help:
+  case kVK_ForwardDelete:
+    return kCGEventFlagMaskNumericPad | kCGEventFlagMaskSecondaryFn;
+
+  case kVK_F1:
+  case kVK_F2:
+  case kVK_F3:
+  case kVK_F4:
+  case kVK_F5:
+  case kVK_F6:
+  case kVK_F7:
+  case kVK_F8:
+  case kVK_F9:
+  case kVK_F10:
+  case kVK_F11:
+  case kVK_F12:
+  case kVK_F13:
+  case kVK_F14:
+  case kVK_F15:
+  case kVK_F16:
+  case kVK_F17:
+  case kVK_F18:
+  case kVK_F19:
+  case kVK_F20:
+  case s_missionControlVK:
+    return kCGEventFlagMaskSecondaryFn;
+
+  default:
+    return 0;
+  }
+}
+
+CGEventFlags OSXKeyState::getVirtualKeyFlags(CGKeyCode virtualKey) const
+{
+  return getKeyboardEventFlags() | getSyntheticFlagsForVirtualKey(virtualKey);
+}
+
 void OSXKeyState::setKeyboardModifiers(CGKeyCode virtualKey, bool keyDown)
 {
   switch (virtualKey) {
@@ -640,7 +688,7 @@ void OSXKeyState::setKeyboardModifiers(CGKeyCode virtualKey, bool keyDown)
   }
 }
 
-kern_return_t OSXKeyState::postHIDVirtualKey(uint8_t virtualKey, bool postDown)
+kern_return_t OSXKeyState::postHIDVirtualKey(CGKeyCode virtualKey, bool postDown)
 {
   NXEventData event;
   bzero(&event, sizeof(NXEventData));
@@ -656,7 +704,10 @@ kern_return_t OSXKeyState::postHIDVirtualKey(uint8_t virtualKey, bool postDown)
           IOHIDPostEvent(driver, NX_FLAGSCHANGED, {0, 0}, &event, kNXEventDataVersion, getKeyboardEventFlags(), true);
     } else {
       const auto eventType = postDown ? NX_KEYDOWN : NX_KEYUP;
-      result = IOHIDPostEvent(driver, eventType, {0, 0}, &event, kNXEventDataVersion, 0, false);
+      result = IOHIDPostEvent(
+          driver, eventType, {0, 0}, &event, kNXEventDataVersion,
+          static_cast<IOOptionBits>(getVirtualKeyFlags(virtualKey)), false
+      );
     }
   }
 
@@ -667,7 +718,7 @@ void OSXKeyState::postKeyboardKey(CGKeyCode virtualKey, bool keyDown)
 {
   CGEventRef event = CGEventCreateKeyboardEvent(nullptr, virtualKey, keyDown);
   if (event) {
-    CGEventSetFlags(event, getKeyboardEventFlags());
+    CGEventSetFlags(event, getVirtualKeyFlags(virtualKey));
     CGEventPost(kCGHIDEventTap, event);
     CFRelease(event);
   } else {
